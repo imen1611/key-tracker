@@ -203,8 +203,16 @@ tbody tr:hover td{background:#faf8f4}
 .del-btn:hover{background:#fdf0ed}
 .sync-live{display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,.55);font-family:var(--mono)}
 .photo-gallery{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-.photo-gallery img{width:90px;height:90px;object-fit:cover;border-radius:var(--r);border:1px solid var(--border);cursor:pointer;flex-shrink:0}
+.photo-gallery img{width:90px;height:90px;object-fit:cover;border-radius:var(--r);border:1px solid var(--border);cursor:zoom-in;flex-shrink:0}
 .photo-gallery img:hover{opacity:.85}
+#photo-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:1.5rem}
+#photo-lightbox img{max-width:90vw;max-height:75vh;object-fit:contain;border-radius:var(--r2);box-shadow:0 8px 40px rgba(0,0,0,.5)}
+#photo-lightbox .lb-actions{display:flex;gap:12px;align-items:center}
+#photo-lightbox .lb-btn{padding:8px 20px;border-radius:var(--r);font-family:var(--ff);font-size:13px;font-weight:500;cursor:pointer;border:none}
+#photo-lightbox .lb-close{background:rgba(255,255,255,.15);color:white}
+#photo-lightbox .lb-download{background:white;color:var(--black)}
+#photo-lightbox .lb-close:hover{background:rgba(255,255,255,.25)}
+#photo-lightbox .lb-download:hover{opacity:.9}
 </style>
 </head>
 <body>
@@ -357,6 +365,14 @@ tbody tr:hover td{background:#faf8f4}
   </main>
 </div>
 
+<div id="photo-lightbox" onclick="if(event.target===this)closePhotoLightbox()">
+  <img id="lb-img" src="" alt="Key/Fob photo">
+  <div class="lb-actions">
+    <button class="lb-btn lb-download" onclick="downloadPhoto()">⬇ Download photo</button>
+    <button class="lb-btn lb-close" onclick="closePhotoLightbox()">✕ Close</button>
+  </div>
+</div>
+
 <div class="loading-overlay hide" id="loading">
   <div class="spinner"></div>
   <div class="loading-txt" id="loading-txt">Loading…</div>
@@ -502,7 +518,11 @@ document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible'&&!CFG.demo)loadData(true);
 });
 async function writeRow(sheet,row){if(CFG.demo)return;await apiCall({action:'appendRow',sheet,row})}
-async function updateRow(sheet,idField,idValue,updates){if(CFG.demo)return;await apiCall({action:'updateRow',sheet,idField,idValue,updates})}
+async function updateRow(sheet,idField,idValue,updates,keyNumber){
+  if(CFG.demo)return;
+  // If keyNumber provided, pass it so Apps Script can match Transit+KeyNumber uniquely
+  await apiCall({action:'updateRow',sheet,idField,idValue,updates,keyNumber:keyNumber||null});
+}
 
 // ── RENDER ALL ────────────────────────────────────
 function renderAll(){
@@ -866,16 +886,24 @@ function openModal(type,id){
     }<\/script>`;
   }
   else if(type==='issue'){
-    const availOpts=availableKeys.map(k=>`<option value="${''+k.Transit+'-'+k.KeyNumber}">${k.Transit} / ${k.KeyNumber} — ${k.Type} — ${k.Client} — ${k.Location}</option>`).join('')||'<option value="">No keys available (all are currently issued)</option>';
-    // Build guard options with role shown
+    // ALL keys in database — no filter, guard to guard allowed
+    const allKeys=keys;
     const guardDropOpts=guards.length
-      ? guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}" data-role="${g.Role||''}" data-phone="${g.Phone||''}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')
+      ? guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')
       : '<option value="">No guards added yet — go to Guards tab first</option>';
-    m.innerHTML=`<h3>Issue key / fob to guard</h3>
+    m.innerHTML=`<h3>Issue key / fob</h3>
     <div class="mf">
-      <div class="fg"><label>Key / Fob (Transit / Number)</label>
-        <select id="mf-key">${availOpts}</select></div>
-      <div class="fg"><label>Issued to</label>
+      <div class="fg"><label>Search key / fob</label>
+        <input id="mf-key-search" placeholder="Type transit #, key #, client, location…" oninput="filterIssueKeys(this.value)" autocomplete="off"
+          style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none;margin-bottom:6px">
+        <div id="issue-key-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)"></div>
+        <div id="issue-key-selected" style="display:none;margin-top:8px;padding:8px 12px;background:var(--blue-bg);border-radius:var(--r);font-size:12px;font-family:var(--mono)"></div>
+        <input type="hidden" id="mf-key">
+      </div>
+      <div class="fg"><label>Currently held by</label>
+        <div id="issue-current-holder" style="padding:7px 11px;background:var(--off);border-radius:var(--r);font-size:13px;color:var(--muted)">— select a key first —</div>
+      </div>
+      <div class="fg"><label>Issue to (new holder)</label>
         <select id="mf-guard" onchange="onGuardSelect(this.value)">
           <option value="">— Select a guard —</option>
           ${guardDropOpts}
@@ -897,7 +925,50 @@ function openModal(type,id){
     <div class="modal-actions">
       <button class="btn-outline" onclick="closeModal()">Cancel</button>
       <button class="btn-action" onclick="doIssue()">Confirm issuance</button>
-    </div>`;
+    </div>
+    <script>
+    // Populate list on open
+    setTimeout(()=>filterIssueKeys(''),0);
+    function filterIssueKeys(q){
+      const list=document.getElementById('issue-key-list');
+      if(!list)return;
+      const filtered=keys.filter(k=>{
+        if(!q)return true;
+        const hay=((k.Transit||'')+(k.KeyNumber||'')+(k.Client||'')+(k.Location||'')+(k.Type||'')+(k.HeldBy||'')).toLowerCase();
+        return hay.includes(q.toLowerCase());
+      });
+      if(!filtered.length){list.innerHTML='<div style="padding:10px 12px;font-size:13px;color:var(--muted)">No keys match</div>';return;}
+      list.innerHTML=filtered.map(k=>{
+        const tid=(k.Transit||'')+'-'+(k.KeyNumber||'');
+        const statusColor=k.Status==='Flagged'?'var(--danger)':k.Status==='Overdue'?'var(--warn)':k.Status==='Issued'||k.Status==='With Staff'?'var(--blue)':'var(--ok)';
+        return \`<div onclick="selectIssueKey('\${tid}')" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" onmouseover="this.style.background='var(--off)'" onmouseout="this.style.background=''">
+          <span style="font-family:var(--mono);font-weight:500">\${k.Transit}</span> / <span style="font-family:var(--mono)">\${k.KeyNumber}</span>
+          <span style="font-size:11px;background:var(--off);border-radius:3px;padding:1px 6px;margin-left:4px">\${k.Type}</span>
+          <span style="float:right;font-size:11px;color:\${statusColor};font-weight:500">\${k.Status}</span>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">\${k.Client} — \${k.Location}</div>
+          \${k.HeldBy?'<div style="font-size:11px;color:var(--blue);margin-top:1px">Currently with: '+k.HeldBy+'</div>':''}
+        </div>\`;
+      }).join('');
+    }
+    function selectIssueKey(tid){
+      document.getElementById('mf-key').value=tid;
+      const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===tid||x.Transit===tid||x.KeyNumber===tid);
+      const sel=document.getElementById('issue-key-selected');
+      const holder=document.getElementById('issue-current-holder');
+      const search=document.getElementById('mf-key-search');
+      if(k){
+        sel.style.display='';
+        sel.innerHTML=\`✓ Selected: <strong>\${k.Transit} / \${k.KeyNumber}</strong> — \${k.Client} — \${k.Location}\`;
+        holder.textContent=k.HeldBy?k.HeldBy+' ('+k.HeldByRole+')'  :'Not currently assigned';
+        if(search)search.value=k.Transit+' / '+k.KeyNumber;
+      }
+      document.getElementById('issue-key-list').style.display='none';
+    }
+    document.getElementById('mf-key-search').addEventListener('focus',function(){
+      document.getElementById('issue-key-list').style.display='';
+      filterIssueKeys(this.value);
+    });
+    <\/script>`;
   }
   else if(type==='return'){
     const retOpts=issuedKeys.map(k=>`<option value="${''+k.Transit+'-'+k.KeyNumber}">${k.Transit}/${k.KeyNumber} — ${k.HeldBy||'?'} — ${k.Location}</option>`).join('')||'<option>None currently out</option>';
@@ -1003,8 +1074,10 @@ function openModal(type,id){
     m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
     ${k.Photo?(()=>{
       const photos=k.Photo.split('||PHOTO||').filter(p=>p);
-      if(photos.length===1)return `<img src="${photos[0]}" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r2);margin-bottom:1rem;border:1px solid var(--border);background:var(--off)" onclick="window.open('${photos[0]}')" title="Click to enlarge">`;
-      return `<div class="photo-gallery" style="margin-bottom:1rem">${photos.map(p=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover" onclick="window.open('${p}')" title="Click to enlarge">`).join('')}</div>`;
+      if(photos.length===1)return `<img src="${photos[0]}" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r2);margin-bottom:6px;border:1px solid var(--border);background:var(--off);cursor:zoom-in" onclick="openPhotoLightbox('${photos[0]}','${k.Transit||''}_${k.KeyNumber||''}')" title="Click to view & download">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:1rem;text-align:center">Click photo to enlarge &amp; download</div>`;
+      return `<div class="photo-gallery" style="margin-bottom:1rem">${photos.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in" onclick="openPhotoLightbox('${p}','${k.Transit||''}_${k.KeyNumber||''}_${i+1}')" title="Click to view & download">`).join('')}
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;width:100%">Click any photo to enlarge &amp; download</div></div>`;
     })():''}
     <div class="modal-detail">
       <table>
@@ -1103,18 +1176,40 @@ async function doAddKey(){
   else toast('Added ✓');
 }
 async function doIssue(){
-  const transit=v('mf-key');
+  const tid=v('mf-key');
   const guard=v('mf-guard');
   const roleSel=v('mf-role');
   const role=roleSel==='Other'?v('mf-role-custom'):roleSel;
   const note=v('mf-notes'),pickup=v('mf-pickup'),pickupDate=v('mf-pickupdate')||new Date().toISOString().split('T')[0];
-  if(!transit||!guard){toast('Key/Fob and recipient name required',true);return}
-  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===transit||x.Transit===transit||x.KeyNumber===transit);if(!k)return;
+  if(!tid){toast('Please select a key/fob first',true);return}
+  if(!guard){toast('Please select a guard',true);return}
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===tid||x.Transit===tid||x.KeyNumber===tid);
+  if(!k){toast('Key not found',true);return}
+  // Update local state immediately
   k.Status='Issued';k.HeldBy=guard;k.HeldByRole=role;k.PickupDate=pickupDate;k.LastCheckDate=pickupDate;
-  const logRow={Timestamp:new Date().toISOString(),Action:'Issued',KeyID:k.Transit,Guard:guard,Note:`${pickup}. Role: ${role}. Pickup: ${pickupDate}. ${note}`,Manager:CFG.name};
-  audit.unshift(logRow);closeModal();renderAll();
-  if(!CFG.demo){try{await updateRow('Keys','Transit',k.Transit,{Status:'Issued',HeldBy:guard,HeldByRole:role,PickupDate:pickupDate,LastCheckDate:pickupDate});await writeRow('AuditLog',logRow);toast('Issued ✓');}catch(e){toast('Saved locally – sync failed',true);}}
-  else toast('Issued ✓');
+  const logRow={Timestamp:new Date().toISOString(),Action:'Issued',KeyID:k.Transit+'-'+k.KeyNumber,Guard:guard,Note:`${pickup}. Role: ${role}. Pickup: ${pickupDate}. ${note}`,Manager:CFG.name};
+  audit.unshift(logRow);
+  // Re-render stats and table WITHOUT closing modal — so user can issue another key
+  updateStats();renderTable();renderReminders();
+  // Show success inside modal and reset key selection
+  const selectedBox=document.getElementById('issue-key-selected');
+  const holderBox=document.getElementById('issue-current-holder');
+  const keyInput=document.getElementById('mf-key');
+  const searchInput=document.getElementById('mf-key-search');
+  if(selectedBox)selectedBox.innerHTML='<span style="color:var(--ok)">✓ Issued '+k.Transit+'/'+k.KeyNumber+' to '+guard+'</span>';
+  if(holderBox)holderBox.textContent='— select a key first —';
+  if(keyInput)keyInput.value='';
+  if(searchInput)searchInput.value='';
+  // Refresh the key list in modal so issued key moves to "Issued" status
+  if(typeof filterIssueKeys==='function')filterIssueKeys('');
+  toast('Issued ✓ — select another key or close');
+  // Save to Sheet in background
+  if(!CFG.demo){
+    try{
+      await updateRow('Keys','Transit',k.Transit,{Status:'Issued',HeldBy:guard,HeldByRole:role,PickupDate:pickupDate,LastCheckDate:pickupDate},k.KeyNumber);
+      await writeRow('AuditLog',logRow);
+    }catch(e){toast('Saved locally – Sheet sync failed',true);}
+  }
 }
 async function doReturn(){
   const transit=v('mf-key'),returnedBy=v('mf-guard'),note=v('mf-notes'),cond=v('mf-cond');
@@ -1416,6 +1511,31 @@ function toggleOtherRole(val){
   custom.style.display=val==='Other'?'':'none';
   if(val==='Other')custom.focus();
 }
+
+let _lbFilename='photo';
+function openPhotoLightbox(src,filename){
+  _lbFilename=filename||'key-photo';
+  const lb=document.getElementById('photo-lightbox');
+  const img=document.getElementById('lb-img');
+  if(!lb||!img)return;
+  img.src=src;
+  lb.style.display='flex';
+  document.body.style.overflow='hidden';
+}
+function closePhotoLightbox(){
+  const lb=document.getElementById('photo-lightbox');
+  if(lb)lb.style.display='none';
+  document.body.style.overflow='';
+}
+function downloadPhoto(){
+  const img=document.getElementById('lb-img');
+  if(!img||!img.src)return;
+  const a=document.createElement('a');
+  a.href=img.src;
+  a.download=_lbFilename+'.jpg';
+  a.click();
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closePhotoLightbox();});
 </script>
 </body>
 </html>
