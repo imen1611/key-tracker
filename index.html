@@ -925,50 +925,9 @@ function openModal(type,id){
     <div class="modal-actions">
       <button class="btn-outline" onclick="closeModal()">Cancel</button>
       <button class="btn-action" onclick="doIssue()">Confirm issuance</button>
-    </div>
-    <script>
-    // Populate list on open
-    setTimeout(()=>filterIssueKeys(''),0);
-    function filterIssueKeys(q){
-      const list=document.getElementById('issue-key-list');
-      if(!list)return;
-      const filtered=keys.filter(k=>{
-        if(!q)return true;
-        const hay=((k.Transit||'')+(k.KeyNumber||'')+(k.Client||'')+(k.Location||'')+(k.Type||'')+(k.HeldBy||'')).toLowerCase();
-        return hay.includes(q.toLowerCase());
-      });
-      if(!filtered.length){list.innerHTML='<div style="padding:10px 12px;font-size:13px;color:var(--muted)">No keys match</div>';return;}
-      list.innerHTML=filtered.map(k=>{
-        const tid=(k.Transit||'')+'-'+(k.KeyNumber||'');
-        const statusColor=k.Status==='Flagged'?'var(--danger)':k.Status==='Overdue'?'var(--warn)':k.Status==='Issued'||k.Status==='With Staff'?'var(--blue)':'var(--ok)';
-        return \`<div onclick="selectIssueKey('\${tid}')" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" onmouseover="this.style.background='var(--off)'" onmouseout="this.style.background=''">
-          <span style="font-family:var(--mono);font-weight:500">\${k.Transit}</span> / <span style="font-family:var(--mono)">\${k.KeyNumber}</span>
-          <span style="font-size:11px;background:var(--off);border-radius:3px;padding:1px 6px;margin-left:4px">\${k.Type}</span>
-          <span style="float:right;font-size:11px;color:\${statusColor};font-weight:500">\${k.Status}</span>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">\${k.Client} — \${k.Location}</div>
-          \${k.HeldBy?'<div style="font-size:11px;color:var(--blue);margin-top:1px">Currently with: '+k.HeldBy+'</div>':''}
-        </div>\`;
-      }).join('');
-    }
-    function selectIssueKey(tid){
-      document.getElementById('mf-key').value=tid;
-      const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===tid||x.Transit===tid||x.KeyNumber===tid);
-      const sel=document.getElementById('issue-key-selected');
-      const holder=document.getElementById('issue-current-holder');
-      const search=document.getElementById('mf-key-search');
-      if(k){
-        sel.style.display='';
-        sel.innerHTML=\`✓ Selected: <strong>\${k.Transit} / \${k.KeyNumber}</strong> — \${k.Client} — \${k.Location}\`;
-        holder.textContent=k.HeldBy?k.HeldBy+' ('+k.HeldByRole+')'  :'Not currently assigned';
-        if(search)search.value=k.Transit+' / '+k.KeyNumber;
-      }
-      document.getElementById('issue-key-list').style.display='none';
-    }
-    document.getElementById('mf-key-search').addEventListener('focus',function(){
-      document.getElementById('issue-key-list').style.display='';
-      filterIssueKeys(this.value);
-    });
-    <\/script>`;
+    </div>`;
+    // Populate key list after modal renders
+    setTimeout(()=>filterIssueKeys(''),50);
   }
   else if(type==='return'){
     const retOpts=issuedKeys.map(k=>`<option value="${''+k.Transit+'-'+k.KeyNumber}">${k.Transit}/${k.KeyNumber} — ${k.HeldBy||'?'} — ${k.Location}</option>`).join('')||'<option>None currently out</option>';
@@ -1200,8 +1159,8 @@ async function doIssue(){
   if(holderBox)holderBox.textContent='— select a key first —';
   if(keyInput)keyInput.value='';
   if(searchInput)searchInput.value='';
-  // Refresh the key list in modal so issued key moves to "Issued" status
-  if(typeof filterIssueKeys==='function')filterIssueKeys('');
+  // Refresh the key list so status updates immediately
+  filterIssueKeys('');
   toast('Issued ✓ — select another key or close');
   // Save to Sheet in background
   if(!CFG.demo){
@@ -1511,6 +1470,64 @@ function toggleOtherRole(val){
   custom.style.display=val==='Other'?'':'none';
   if(val==='Other')custom.focus();
 }
+
+function filterIssueKeys(q){
+  const list=document.getElementById('issue-key-list');
+  if(!list)return;
+  list.style.display='';
+  const filtered=keys.filter(k=>{
+    if(!q)return true;
+    const hay=((k.Transit||'')+' '+(k.KeyNumber||'')+' '+(k.Client||'')+' '+(k.Location||'')+' '+(k.Type||'')+' '+(k.HeldBy||'')).toLowerCase();
+    return hay.includes(q.toLowerCase());
+  });
+  if(!filtered.length){
+    list.innerHTML='<div style="padding:10px 12px;font-size:13px;color:var(--muted)">No keys match — try a different search</div>';
+    return;
+  }
+  list.innerHTML=filtered.map(k=>{
+    const tid=(k.Transit||'')+'-'+(k.KeyNumber||'');
+    const sc=k.Status==='Flagged'?'var(--danger)':k.Status==='Overdue'?'var(--warn)':k.Status==='Issued'?'var(--blue)':k.Status==='With Staff'?'var(--ok)':'var(--muted)';
+    const safeTid=tid.replace(/'/g,"\\'");
+    return '<div onclick="selectIssueKey(\''+safeTid+'\')" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" onmouseover="this.style.background=\'var(--off)\'" onmouseout="this.style.background=\'\'">'
+      +'<span style="font-family:var(--mono);font-weight:500">'+k.Transit+'</span>'
+      +' / <span style="font-family:var(--mono)">'+k.KeyNumber+'</span>'
+      +' <span style="font-size:11px;background:var(--off);border-radius:3px;padding:1px 6px;margin-left:4px">'+k.Type+'</span>'
+      +'<span style="float:right;font-size:11px;color:'+sc+';font-weight:500">'+k.Status+'</span>'
+      +'<div style="font-size:12px;color:var(--muted);margin-top:2px">'+k.Client+' — '+k.Location+'</div>'
+      +(k.HeldBy?'<div style="font-size:11px;color:var(--blue);margin-top:1px">With: '+k.HeldBy+'</div>':'')
+      +'</div>';
+  }).join('');
+}
+
+function selectIssueKey(tid){
+  const keyInput=document.getElementById('mf-key');
+  const sel=document.getElementById('issue-key-selected');
+  const holder=document.getElementById('issue-current-holder');
+  const search=document.getElementById('mf-key-search');
+  const list=document.getElementById('issue-key-list');
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===tid||x.Transit===tid||x.KeyNumber===tid);
+  if(keyInput)keyInput.value=tid;
+  if(k){
+    if(sel){sel.style.display='';sel.innerHTML='✓ <strong>'+k.Transit+' / '+k.KeyNumber+'</strong> — '+k.Client+' — '+k.Location;}
+    if(holder)holder.textContent=k.HeldBy?k.HeldBy+' ('+k.HeldByRole+')':'Not currently assigned';
+    if(search)search.value=k.Transit+' / '+k.KeyNumber;
+  }
+  if(list)list.style.display='none';
+}
+
+// Wire up focus listener for issue search — uses event delegation since modal is dynamic
+document.addEventListener('focus',function(e){
+  if(e.target&&e.target.id==='mf-key-search'){
+    filterIssueKeys(e.target.value);
+  }
+},true);
+document.addEventListener('click',function(e){
+  const list=document.getElementById('issue-key-list');
+  const search=document.getElementById('mf-key-search');
+  if(list&&search&&!list.contains(e.target)&&e.target!==search){
+    list.style.display='none';
+  }
+});
 
 let _lbFilename='photo';
 function openPhotoLightbox(src,filename){
