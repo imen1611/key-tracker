@@ -595,7 +595,7 @@ function renderTable(){
     const checkDue=needsCheck(k);
     const lastCheckDays=daysOut(k.LastCheckDate||k.PickupDate);
     const rc=k.Status==='Flagged'?'flagged-row':k.Status==='Overdue'?'overdue-row':checkDue?'remind-row':'';
-    const tid=k.Transit||k.KeyNumber||'';
+    const tid=(k.Transit||'')+(k.Transit&&k.KeyNumber?'-':'')+(k.KeyNumber||'');
     return`<tr class="${rc}">
       <td class="mono" style="font-weight:500">${k.Transit||'—'}</td>
       <td class="mono">${k.KeyNumber||'—'}</td>
@@ -865,7 +865,7 @@ function openModal(type,id){
     }<\/script>`;
   }
   else if(type==='issue'){
-    const availOpts=availableKeys.map(k=>`<option value="${k.Transit||k.KeyNumber}">${k.Transit} / ${k.KeyNumber} — ${k.Client} — ${k.Location}</option>`).join('')||'<option value="">No keys available (all are currently issued)</option>';
+    const availOpts=availableKeys.map(k=>`<option value="${''+k.Transit+'-'+k.KeyNumber}">${k.Transit} / ${k.KeyNumber} — ${k.Type} — ${k.Client} — ${k.Location}</option>`).join('')||'<option value="">No keys available (all are currently issued)</option>';
     // Build guard options with role shown
     const guardDropOpts=guards.length
       ? guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}" data-role="${g.Role||''}" data-phone="${g.Phone||''}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')
@@ -899,7 +899,7 @@ function openModal(type,id){
     </div>`;
   }
   else if(type==='return'){
-    const retOpts=issuedKeys.map(k=>`<option value="${k.Transit||k.KeyNumber}">${k.Transit}/${k.KeyNumber} — ${k.HeldBy||'?'} — ${k.Location}</option>`).join('')||'<option>None currently out</option>';
+    const retOpts=issuedKeys.map(k=>`<option value="${''+k.Transit+'-'+k.KeyNumber}">${k.Transit}/${k.KeyNumber} — ${k.HeldBy||'?'} — ${k.Location}</option>`).join('')||'<option>None currently out</option>';
     // Build client options for bank return
     const clientOpts2=clients.map(c=>`<option value="${c.Name}">${c.Name}</option>`).join('')||'<option>CIBC</option><option>RBC</option>';
     m.innerHTML=`<h3>Log key / fob return</h3>
@@ -954,7 +954,7 @@ function openModal(type,id){
       prefillReturnedBy(sel?sel.value:'');
     },50);
     function prefillReturnedBy(transit){
-      const k=keys.find(x=>(x.Transit===transit||x.KeyNumber===transit));
+      const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber===transit||x.Transit===transit||x.KeyNumber===transit));
       if(k&&k.HeldBy){const el=document.getElementById('mf-guard');if(el&&!el.value)el.value=k.HeldBy;showGuardContact(k.HeldBy,'ret-contact-box');}
     }
     function toggleReturnDest(val){
@@ -964,7 +964,7 @@ function openModal(type,id){
     <\/script>`;
   }
   else if(type==='check'){
-    const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);
+    const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
     if(!k)return;
     const daysSince=daysOut(k.LastCheckDate||k.PickupDate);
     m.innerHTML=`<h3>Bi-weekly custody check — ${id}</h3>
@@ -993,11 +993,11 @@ function openModal(type,id){
     </div>`;
   }
   else if(type==='view'){
-    const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);
+    const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
     if(!k)return;
     const days=daysOut(k.PickupDate);
     const checkDays=daysOut(k.LastCheckDate||k.PickupDate);
-    const tid=k.Transit||k.KeyNumber;
+    const tid=(k.Transit||'')+(k.Transit&&k.KeyNumber?'-':'')+(k.KeyNumber||'');
     const recentAudit=audit.filter(e=>e.KeyID===tid).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp)).slice(0,3);
     m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
     ${k.Photo?(()=>{
@@ -1083,7 +1083,9 @@ async function doAddKey(){
     recvNote=`${recv} — Address: ${recvAddr}`;
   }
   if(!transit||!loc){toast('Transit # and location required',true);return}
-  if(keys.find(k=>k.Transit===transit)){toast('Transit # already exists',true);return}
+  if(!keynum){toast('Key / Fob number is required',true);return}
+  // Uniqueness is Transit + KeyNumber combined — same transit can have multiple keys
+  if(keys.find(k=>k.Transit===transit&&k.KeyNumber===keynum)){toast('This Transit + Key/Fob number already exists',true);return}
   const today=new Date().toISOString().split('T')[0];
   // Handle multiple photos
   let photoData='';
@@ -1094,7 +1096,7 @@ async function doAddKey(){
     photoData=results.join('||PHOTO||');
   }
   const row={Transit:transit,KeyNumber:keynum,Type:type,Client:client,Location:loc,Status:'With Staff',HeldBy:CFG.name,HeldByRole:'Manager',PickupDate:today,LastCheckDate:today,ReturnedTo:'',Photo:photoData,Notes:notes,AddedDate:today};
-  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:transit,Guard:CFG.name,Note:`Received via: ${recvNote}. Key#: ${keynum}. ${notes}`,Manager:CFG.name};
+  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:`${transit}-${keynum}`,Guard:CFG.name,Note:`Received via: ${recvNote}. Key#: ${keynum}. ${notes}`,Manager:CFG.name};
   keys.push(row);audit.unshift(logRow);closeModal();renderAll();
   if(!CFG.demo){try{await writeRow('Keys',row);await writeRow('AuditLog',logRow);toast('Added ✓');}catch(e){toast('Saved locally – sync failed',true);}}
   else toast('Added ✓');
@@ -1106,7 +1108,7 @@ async function doIssue(){
   const role=roleSel==='Other'?v('mf-role-custom'):roleSel;
   const note=v('mf-notes'),pickup=v('mf-pickup'),pickupDate=v('mf-pickupdate')||new Date().toISOString().split('T')[0];
   if(!transit||!guard){toast('Key/Fob and recipient name required',true);return}
-  const k=keys.find(x=>x.Transit===transit||x.KeyNumber===transit);if(!k)return;
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===transit||x.Transit===transit||x.KeyNumber===transit);if(!k)return;
   k.Status='Issued';k.HeldBy=guard;k.HeldByRole=role;k.PickupDate=pickupDate;k.LastCheckDate=pickupDate;
   const logRow={Timestamp:new Date().toISOString(),Action:'Issued',KeyID:k.Transit,Guard:guard,Note:`${pickup}. Role: ${role}. Pickup: ${pickupDate}. ${note}`,Manager:CFG.name};
   audit.unshift(logRow);closeModal();renderAll();
@@ -1118,7 +1120,7 @@ async function doReturn(){
   const returnDate=v('mf-returndate')||new Date().toISOString().split('T')[0];
   const dest=v('mf-return-dest')||'staff';
   if(!transit){toast('Select a key/fob',true);return}
-  const k=keys.find(x=>x.Transit===transit||x.KeyNumber===transit);if(!k)return;
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===transit||x.Transit===transit||x.KeyNumber===transit);if(!k)return;
 
   let newStatus,newHeldBy,newHeldByRole,returnedTo,logNote;
 
@@ -1157,7 +1159,7 @@ async function doReturn(){
   } else toast('Return logged ✓');
 }
 async function doCheck(keyId){
-  const k=keys.find(x=>x.Transit===keyId||x.KeyNumber===keyId);if(!k)return;
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===keyId||x.Transit===keyId||x.KeyNumber===keyId);if(!k)return;
   const custody=v('mf-custody');
   const checker=v('mf-checker')||CFG.name;
   const notes=v('mf-notes');
@@ -1198,7 +1200,7 @@ async function doCheck(keyId){
   }
 }
 async function doFlag(id){
-  const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);if(!k)return;
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);if(!k)return;
   k.Status='Flagged';
   const logRow={Timestamp:new Date().toISOString(),Action:'Flagged',KeyID:k.Transit,Guard:k.HeldBy,Note:'🚩 Flagged as missing / unresponsive guard',Manager:CFG.name};
   audit.unshift(logRow);closeModal();renderAll();toast('Flagged 🚩');
@@ -1208,7 +1210,7 @@ async function doFlag(id){
   }
 }
 async function doUnflag(id){
-  const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);if(!k)return;
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);if(!k)return;
   k.Status='Issued';
   const logRow={Timestamp:new Date().toISOString(),Action:'Unflagged',KeyID:k.Transit,Guard:k.HeldBy,Note:'Flag resolved – accounted for',Manager:CFG.name};
   audit.unshift(logRow);closeModal();renderAll();toast('Unflagged ✓');
@@ -1235,7 +1237,7 @@ function confirmDelete(type,id){
 async function doDelete(type,id){
   closeModal();
   if(type==='key'){
-    const idx=keys.findIndex(x=>x.Transit===id||x.KeyNumber===id);
+    const idx=keys.findIndex(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
     if(idx===-1)return;
     const k=keys[idx];
     keys.splice(idx,1);
@@ -1259,8 +1261,8 @@ async function doDelete(type,id){
   renderAll();renderGuards();
 }
 function viewKey(id){
-  const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);
-  if(k)openModal('view',k.Transit||k.KeyNumber);
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
+  if(k)openModal('view',`${k.Transit||''}-${k.KeyNumber||''}`);
 }
 
 // ── UTILS ─────────────────────────────────────────
