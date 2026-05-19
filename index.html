@@ -672,8 +672,8 @@ function renderClients(){
       <div class="client-card-top">
         <div class="client-name">${c.Name}</div>
         <div style="display:flex;gap:4px">
-          <button class="act-btn" onclick="editClient('${c.Name}')">Edit</button>
-          <button class="del-btn" onclick="confirmDelete('client','${c.Name}')">Delete</button>
+          <button class="act-btn" onclick="editClient(this.dataset.n)" data-n="${c.Name}">Edit</button>
+          <button class="del-btn" onclick="confirmDelete('client',this.dataset.n)" data-n="${c.Name}">Delete</button>
         </div>
       </div>
       <div class="client-meta">
@@ -689,7 +689,7 @@ function renderClients(){
         ${flagged?`<span class="cs-pill" style="color:var(--danger)">${flagged} flagged</span>`:''}
       </div>
       <div class="client-actions">
-        <button class="btn-outline" style="font-size:11px" onclick="filterByClient('${c.Name}')">View keys</button>
+        <button class="btn-outline" style="font-size:11px" onclick="filterByClient(this.dataset.n)" data-n="${c.Name}">View keys</button>
       </div>
     </div>`;
   }).join('');
@@ -1185,8 +1185,8 @@ function renderGuards(){
           <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">${g.Role||'Guard'}</div>
         </div>
         <div style="display:flex;gap:4px">
-          <button class="act-btn" onclick="openModal('editGuard','${g.Name.replace(/'/g,'\\'')}')">Edit</button>
-          <button class="del-btn" onclick="confirmDelete('guard','${g.Name.replace(/'/g,'\\'')}')">Delete</button>
+          <button class="act-btn" onclick="openModal('editGuard',this.dataset.n)" data-n="${g.Name}">Edit</button>
+          <button class="del-btn" onclick="confirmDelete('guard',this.dataset.n)" data-n="${g.Name}">Delete</button>
         </div>
       </div>
       <div class="client-meta">
@@ -1199,7 +1199,7 @@ function renderGuards(){
         ${overdue?`<span class="cs-pill" style="color:var(--warn)">${overdue} overdue</span>`:''}
         ${flagged?`<span class="cs-pill" style="color:var(--danger)">${flagged} flagged</span>`:''}
       </div>
-      ${heldKeys.length?`<div class="client-actions"><button class="btn-outline" style="font-size:11px" onclick="filterByGuard('${g.Name.replace(/'/g,"\\'")}')">View held keys</button></div>`:''}
+      ${heldKeys.length?`<div class="client-actions"><button class="btn-outline" style="font-size:11px" onclick="filterByGuard(this.dataset.n)" data-n="${g.Name}">View held keys</button></div>`:''}
     </div>`;
   }).join('');
 }
