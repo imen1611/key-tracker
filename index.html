@@ -491,10 +491,11 @@ async function loadData(silent=false){
 
 // Auto-refresh every 30 seconds
 let _autoRefreshTimer=null;
+let _savingInProgress=false;
 function startAutoRefresh(){
   if(_autoRefreshTimer)clearInterval(_autoRefreshTimer);
   _autoRefreshTimer=setInterval(()=>{
-    if(!CFG.demo&&document.visibilityState!=='hidden')loadData(true);
+    if(!CFG.demo&&document.visibilityState!=='hidden'&&!_savingInProgress)loadData(true);
   },30000);
 }
 document.addEventListener('visibilitychange',()=>{
@@ -819,7 +820,28 @@ function openModal(type,id){
       <div class="fg"><label>Client</label><select id="mf-client">${clientOpts}</select></div>
       <div class="fg"><label>Branch / location</label><input id="mf-loc" placeholder="e.g. CIBC Branch – Laval"></div>
       <div class="fg"><label>How received</label>
-        <select id="mf-recv"><option>Sent to us by bank</option><option>Picked up from bank by manager</option><option>Sent to pickup address</option></select></div>
+        <select id="mf-recv" onchange="toggleRecvAddress(this.value)">
+          <option value="Picked up from bank">Picked up from bank</option>
+          <option value="Picked up from address">Picked up from address</option>
+          <option value="Bank sent to our address">Bank sent to our address</option>
+        </select>
+      </div>
+      <div id="recv-bank-contact-box" style="display:none">
+        <div class="fg"><label>Was anyone present at the bank?</label>
+          <select id="mf-bank-present" onchange="toggleBankContact(this.value)">
+            <option value="yes">Yes — someone was there</option>
+            <option value="no">No — picked up unattended / left at desk</option>
+          </select>
+        </div>
+        <div id="recv-bank-person-box">
+          <div class="fg"><label>Name of person at the bank</label>
+            <input id="mf-bank-person" placeholder="e.g. Pierre Gagnon — CIBC Security">
+          </div>
+        </div>
+      </div>
+      <div id="recv-address-box" style="display:none">
+        <div class="fg"><label>Address</label><input id="mf-recv-addr" placeholder="Enter the pickup / delivery address"></div>
+      </div>
       <div class="fg"><label>Photos of key / fob <span style="font-weight:400;color:var(--muted)">(optional — select multiple)</span></label>
         <input type="file" id="mf-photo" accept="image/*" multiple style="font-family:var(--ff);font-size:13px;padding:6px;width:100%">
         <div id="photo-preview" class="photo-gallery" style="margin-top:6px"></div>
@@ -842,18 +864,30 @@ function openModal(type,id){
     }<\/script>`;
   }
   else if(type==='issue'){
-    const availOpts=availableKeys.map(k=>`<option value="${k.Transit||k.KeyNumber}">${k.Transit} / ${k.KeyNumber} — ${k.Client} — ${k.Location}</option>`).join('')||'<option>None available</option>';
+    const availOpts=availableKeys.map(k=>`<option value="${k.Transit||k.KeyNumber}">${k.Transit} / ${k.KeyNumber} — ${k.Client} — ${k.Location}</option>`).join('')||'<option value="">No keys available (all are currently issued)</option>';
+    // Build guard options with role shown
+    const guardDropOpts=guards.length
+      ? guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}" data-role="${g.Role||''}" data-phone="${g.Phone||''}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')
+      : '<option value="">No guards added yet — go to Guards tab first</option>';
     m.innerHTML=`<h3>Issue key / fob to guard</h3>
     <div class="mf">
       <div class="fg"><label>Key / Fob (Transit / Number)</label>
         <select id="mf-key">${availOpts}</select></div>
-      <div class="fg"><label>Issued to (guard / recipient)</label>
-        <input id="mf-guard" list="gl" placeholder="Type name or select…" oninput="showGuardContact(this.value,'guard-contact-box')">
-        <datalist id="gl">${getGuards().map(g=>`<option>${g}</option>`).join('')}</datalist>
-        <div id="guard-contact-box"></div>
+      <div class="fg"><label>Issued to</label>
+        <select id="mf-guard" onchange="onGuardSelect(this.value)">
+          <option value="">— Select a guard —</option>
+          ${guardDropOpts}
+          <option value="__other__">+ Other (not in guards list)</option>
+        </select>
+        <input id="mf-guard-custom" placeholder="Enter name manually" style="display:none;margin-top:6px;width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
+        <div id="guard-contact-box" style="margin-top:4px"></div>
       </div>
       <div class="fg"><label>Recipient role</label>
-        <select id="mf-role"><option>Guard</option><option>Mobile</option><option>Supervisor</option><option>Manager</option><option>Other</option></select></div>
+        <select id="mf-role" onchange="toggleOtherRole(this.value)">
+          <option>Guard</option><option>Mobile</option><option>Supervisor</option><option>Manager</option><option>Other</option>
+        </select>
+        <input id="mf-role-custom" placeholder="Type role…" style="display:none;margin-top:6px;width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
+      </div>
       <div class="fg"><label>Pickup date</label>
         <input type="date" id="mf-pickupdate" value="${new Date().toISOString().split('T')[0]}"></div>
       <div class="fg"><label>Pickup method</label>
@@ -997,20 +1031,30 @@ async function doAddClient(){
   const today=new Date().toISOString().split('T')[0];
   const row={Name:name,ContactName:v('mf-ccont'),ContactPhone:v('mf-cphone'),ContactEmail:v('mf-cemail'),Address:v('mf-caddr'),Notes:v('mf-cnotes'),AddedDate:today};
   clients.push(row);closeModal();renderAll();
-  if(!CFG.demo){showLoading('Saving…');try{await writeRow('Clients',row);toast('Client added ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  if(!CFG.demo){try{await writeRow('Clients',row);toast('Client added ✓');}catch(e){toast('Saved locally – sync failed',true);}}
   else toast('Client added ✓');
 }
 async function doEditClient(name){
   const c=clients.find(x=>x.Name===name);if(!c)return;
   c.ContactName=v('mf-ccont');c.ContactPhone=v('mf-cphone');c.ContactEmail=v('mf-cemail');c.Address=v('mf-caddr');c.Notes=v('mf-cnotes');
   closeModal();renderAll();
-  if(!CFG.demo){showLoading('Saving…');try{await updateRow('Clients','Name',name,{ContactName:c.ContactName,ContactPhone:c.ContactPhone,ContactEmail:c.ContactEmail,Address:c.Address,Notes:c.Notes});toast('Client updated ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  if(!CFG.demo){try{await updateRow('Clients','Name',name,{ContactName:c.ContactName,ContactPhone:c.ContactPhone,ContactEmail:c.ContactEmail,Address:c.Address,Notes:c.Notes});toast('Client updated ✓');}catch(e){toast('Saved locally – sync failed',true);}}
   else toast('Client updated ✓');
 }
 function editClient(name){openModal('editClient',name)}
 
 async function doAddKey(){
   const transit=v('mf-transit'),keynum=v('mf-keynum'),type=v('mf-type'),client=v('mf-client'),loc=v('mf-loc'),notes=v('mf-notes'),recv=v('mf-recv');
+  const recvAddr=v('mf-recv-addr');
+  const bankPresent=v('mf-bank-present');
+  const bankPerson=v('mf-bank-person');
+  let recvNote=recv;
+  if(recv==='Picked up from bank'){
+    if(bankPresent==='no')recvNote=`${recv} — no one present`;
+    else if(bankPerson)recvNote=`${recv} — received from: ${bankPerson}`;
+  } else if(recvAddr){
+    recvNote=`${recv} — Address: ${recvAddr}`;
+  }
   if(!transit||!loc){toast('Transit # and location required',true);return}
   if(keys.find(k=>k.Transit===transit)){toast('Transit # already exists',true);return}
   const today=new Date().toISOString().split('T')[0];
@@ -1023,19 +1067,25 @@ async function doAddKey(){
     photoData=results.join('||PHOTO||');
   }
   const row={Transit:transit,KeyNumber:keynum,Type:type,Client:client,Location:loc,Status:'With Staff',HeldBy:CFG.name,HeldByRole:'Manager',PickupDate:today,LastCheckDate:today,ReturnedTo:'',Photo:photoData,Notes:notes,AddedDate:today};
-  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:transit,Guard:CFG.name,Note:`Received via: ${recv}. Key#: ${keynum}. ${notes}`,Manager:CFG.name};
+  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:transit,Guard:CFG.name,Note:`Received via: ${recvNote}. Key#: ${keynum}. ${notes}`,Manager:CFG.name};
   keys.push(row);audit.unshift(logRow);closeModal();renderAll();
-  if(!CFG.demo){showLoading('Saving…');try{await writeRow('Keys',row);await writeRow('AuditLog',logRow);toast('Added ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  if(!CFG.demo){try{await writeRow('Keys',row);await writeRow('AuditLog',logRow);toast('Added ✓');}catch(e){toast('Saved locally – sync failed',true);}}
   else toast('Added ✓');
 }
 async function doIssue(){
-  const transit=v('mf-key'),guard=v('mf-guard'),role=v('mf-role'),note=v('mf-notes'),pickup=v('mf-pickup'),pickupDate=v('mf-pickupdate')||new Date().toISOString().split('T')[0];
+  const transit=v('mf-key');
+  const guardSel=document.getElementById('mf-guard');
+  const guardVal=guardSel?guardSel.value:'';
+  const guard=guardVal==='__other__'?v('mf-guard-custom'):guardVal;
+  const roleSel=v('mf-role');
+  const role=roleSel==='Other'?v('mf-role-custom'):roleSel;
+  const note=v('mf-notes'),pickup=v('mf-pickup'),pickupDate=v('mf-pickupdate')||new Date().toISOString().split('T')[0];
   if(!transit||!guard){toast('Key/Fob and recipient name required',true);return}
   const k=keys.find(x=>x.Transit===transit||x.KeyNumber===transit);if(!k)return;
   k.Status='Issued';k.HeldBy=guard;k.HeldByRole=role;k.PickupDate=pickupDate;k.LastCheckDate=pickupDate;
   const logRow={Timestamp:new Date().toISOString(),Action:'Issued',KeyID:k.Transit,Guard:guard,Note:`${pickup}. Role: ${role}. Pickup: ${pickupDate}. ${note}`,Manager:CFG.name};
   audit.unshift(logRow);closeModal();renderAll();
-  if(!CFG.demo){showLoading('Saving…');try{await updateRow('Keys','Transit',k.Transit,{Status:'Issued',HeldBy:guard,HeldByRole:role,PickupDate:pickupDate,LastCheckDate:pickupDate});await writeRow('AuditLog',logRow);toast('Issued ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  if(!CFG.demo){try{await updateRow('Keys','Transit',k.Transit,{Status:'Issued',HeldBy:guard,HeldByRole:role,PickupDate:pickupDate,LastCheckDate:pickupDate});await writeRow('AuditLog',logRow);toast('Issued ✓');}catch(e){toast('Saved locally – sync failed',true);}}
   else toast('Issued ✓');
 }
 async function doReturn(){
@@ -1047,7 +1097,7 @@ async function doReturn(){
   k.Status='With Staff';k.HeldBy=returnedTo;k.HeldByRole='Manager';k.ReturnedTo=returnedTo;k.PickupDate=returnDate;k.LastCheckDate=returnDate;
   const logRow={Timestamp:new Date().toISOString(),Action:'Returned',KeyID:k.Transit,Guard:returnedBy,Note:`Returned by: ${returnedBy} → to: ${returnedTo}. Date: ${returnDate}. Condition: ${cond}. ${note}`,Manager:CFG.name};
   audit.unshift(logRow);closeModal();renderAll();
-  if(!CFG.demo){showLoading('Saving…');try{await updateRow('Keys','Transit',k.Transit,{Status:'With Staff',HeldBy:returnedTo,HeldByRole:'Manager',ReturnedTo:returnedTo,PickupDate:returnDate,LastCheckDate:returnDate});await writeRow('AuditLog',logRow);toast('Return logged ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  if(!CFG.demo){try{await updateRow('Keys','Transit',k.Transit,{Status:'With Staff',HeldBy:returnedTo,HeldByRole:'Manager',ReturnedTo:returnedTo,PickupDate:returnDate,LastCheckDate:returnDate});await writeRow('AuditLog',logRow);toast('Return logged ✓');}catch(e){toast('Saved locally – sync failed',true);}}
   else toast('Return logged ✓');
 }
 async function doCheck(keyId){
@@ -1057,42 +1107,59 @@ async function doCheck(keyId){
   const notes=v('mf-notes');
   const today=new Date().toISOString().split('T')[0];
   let noteText='';
+  closeModal();
   if(custody==='handoff'){
     const newGuard=v('mf-newguard');
     const reason=v('mf-handoff-reason');
     if(!newGuard){toast('Enter new guard name',true);return}
     const oldGuard=k.HeldBy;
     k.HeldBy=newGuard;
+    k.LastCheckDate=today;
     noteText=`Handoff: ${oldGuard} → ${newGuard}. Reason: ${reason}. ${notes}`;
-    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit||keyId,Guard:newGuard,Note:noteText,Manager:checker};
+    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit,Guard:newGuard,Note:noteText,Manager:checker};
     audit.unshift(logRow);
-    if(!CFG.demo)await updateRow('Keys','ID',keyId,{Guard:newGuard,LastCheckDate:today}).catch(()=>{});
-    if(!CFG.demo)await writeRow('AuditLog',logRow).catch(()=>{});
+    renderAll();
+    if(!CFG.demo){
+      try{
+        await updateRow('Keys','Transit',k.Transit,{HeldBy:newGuard,LastCheckDate:today});
+        await writeRow('AuditLog',logRow);
+        toast('Custody check recorded ✓');
+      }catch(e){toast('Saved locally — sync to Sheet failed',true);}
+    } else toast('Custody check recorded ✓');
   } else {
+    k.LastCheckDate=today;
     noteText=`Confirmed: same holder (${k.HeldBy}). ${notes}`;
-    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit||keyId,Guard:k.HeldBy,Note:noteText,Manager:checker};
+    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit,Guard:k.HeldBy,Note:noteText,Manager:checker};
     audit.unshift(logRow);
-    if(!CFG.demo)await updateRow('Keys','ID',keyId,{LastCheckDate:today}).catch(()=>{});
-    if(!CFG.demo)await writeRow('AuditLog',logRow).catch(()=>{});
+    renderAll();
+    if(!CFG.demo){
+      try{
+        await updateRow('Keys','Transit',k.Transit,{LastCheckDate:today});
+        await writeRow('AuditLog',logRow);
+        toast('Custody check recorded ✓');
+      }catch(e){toast('Saved locally — sync to Sheet failed',true);}
+    } else toast('Custody check recorded ✓');
   }
-  k.LastCheckDate=today;
-  closeModal();renderAll();toast('Custody check recorded ✓');
 }
 async function doFlag(id){
   const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);if(!k)return;
   k.Status='Flagged';
-  const logRow={Timestamp:new Date().toISOString(),Action:'Flagged',KeyID:k.Transit||id,Guard:k.HeldBy,Note:'🚩 Flagged as missing / unresponsive guard',Manager:CFG.name};
-  audit.unshift(logRow);closeModal();renderAll();
-  if(!CFG.demo){try{await updateRow('Keys','ID',id,{Status:'Flagged'});await writeRow('AuditLog',logRow);}catch(e){}}
-  else toast('Flagged ✓');
+  const logRow={Timestamp:new Date().toISOString(),Action:'Flagged',KeyID:k.Transit,Guard:k.HeldBy,Note:'🚩 Flagged as missing / unresponsive guard',Manager:CFG.name};
+  audit.unshift(logRow);closeModal();renderAll();toast('Flagged 🚩');
+  if(!CFG.demo){
+    try{await updateRow('Keys','Transit',k.Transit,{Status:'Flagged'});await writeRow('AuditLog',logRow);}
+    catch(e){toast('Flagged locally — Sheet sync failed',true);}
+  }
 }
 async function doUnflag(id){
   const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);if(!k)return;
   k.Status='Issued';
-  const logRow={Timestamp:new Date().toISOString(),Action:'Unflagged',KeyID:k.Transit||id,Guard:k.HeldBy,Note:'Flag resolved – accounted for',Manager:CFG.name};
-  audit.unshift(logRow);closeModal();renderAll();
-  if(!CFG.demo){try{await updateRow('Keys','ID',id,{Status:'Issued'});await writeRow('AuditLog',logRow);}catch(e){}}
-  toast('Unflagged ✓');
+  const logRow={Timestamp:new Date().toISOString(),Action:'Unflagged',KeyID:k.Transit,Guard:k.HeldBy,Note:'Flag resolved – accounted for',Manager:CFG.name};
+  audit.unshift(logRow);closeModal();renderAll();toast('Unflagged ✓');
+  if(!CFG.demo){
+    try{await updateRow('Keys','Transit',k.Transit,{Status:'Issued'});await writeRow('AuditLog',logRow);}
+    catch(e){toast('Unflagged locally — Sheet sync failed',true);}
+  }
 }
 
 function quickFlag(id){doFlag(id)}
@@ -1118,19 +1185,19 @@ async function doDelete(type,id){
     keys.splice(idx,1);
     const logRow={Timestamp:new Date().toISOString(),Action:'Deleted',KeyID:k.Transit||id,Guard:'',Note:`Key/fob deleted by ${CFG.name}`,Manager:CFG.name};
     audit.unshift(logRow);
-    if(!CFG.demo){showLoading('Deleting…');try{await apiCall({action:'deleteRow',sheet:'Keys',idField:'Transit',idValue:k.Transit});await writeRow('AuditLog',logRow);toast('Deleted ✓');}catch(e){toast('Deleted locally – sync may need manual cleanup',true);}finally{hideLoading();}}
+    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Keys',idField:'Transit',idValue:k.Transit});await writeRow('AuditLog',logRow);toast('Deleted ✓');}catch(e){toast('Deleted locally – sync may need manual cleanup',true);}}
     else toast('Deleted ✓');
   } else if(type==='client'){
     const idx=clients.findIndex(c=>c.Name===id);
     if(idx===-1)return;
     clients.splice(idx,1);
-    if(!CFG.demo){showLoading('Deleting…');try{await apiCall({action:'deleteRow',sheet:'Clients',idField:'Name',idValue:id});toast('Client deleted ✓');}catch(e){toast('Deleted locally',true);}finally{hideLoading();}}
+    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Clients',idField:'Name',idValue:id});toast('Client deleted ✓');}catch(e){toast('Deleted locally',true);}}
     else toast('Client deleted ✓');
   } else if(type==='guard'){
     const idx=guards.findIndex(g=>g.Name===id);
     if(idx===-1)return;
     guards.splice(idx,1);
-    if(!CFG.demo){showLoading('Deleting…');try{await apiCall({action:'deleteRow',sheet:'Guards',idField:'Name',idValue:id});toast('Guard deleted ✓');}catch(e){toast('Deleted locally',true);}finally{hideLoading();}}
+    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Guards',idField:'Name',idValue:id});toast('Guard deleted ✓');}catch(e){toast('Deleted locally',true);}}
     else toast('Guard deleted ✓');
   }
   renderAll();renderGuards();
@@ -1148,11 +1215,12 @@ function showGuardContact(name, boxId){
 }
 function v(id){const el=document.getElementById(id);return el?el.value.trim():''}
 function getGuards(){
-  // Merge registered guards + any names from audit/keys not yet registered
+  // Primary source: guards database
   const fromRegistry=guards.map(g=>g.Name);
+  // Fallback: names from keys/audit not yet in registry
   const fromHistory=new Set();
   audit.forEach(e=>{if(e.Guard)fromHistory.add(e.Guard)});
-  keys.forEach(k=>{if(k.Guard)fromHistory.add(k.Guard)});
+  keys.forEach(k=>{if(k.HeldBy)fromHistory.add(k.HeldBy)});
   fromHistory.forEach(n=>{if(!fromRegistry.includes(n))fromRegistry.push(n)});
   return fromRegistry.sort();
 }
@@ -1217,14 +1285,14 @@ async function doAddGuard(){
   const today=new Date().toISOString().split('T')[0];
   const row={Name:name,Phone:v('mf-gphone'),Email:v('mf-gemail'),Role:v('mf-grole'),Notes:v('mf-gnotes'),AddedDate:today};
   guards.push(row);closeModal();renderAll();renderGuards();
-  if(!CFG.demo){showLoading('Saving…');try{await writeRow('Guards',row);toast('Guard added ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  if(!CFG.demo){try{await writeRow('Guards',row);toast('Guard added ✓');}catch(e){toast('Saved locally – sync failed',true);}}
   else toast('Guard added ✓');
 }
 async function doEditGuard(name){
   const g=guards.find(x=>x.Name===name);if(!g)return;
   g.Phone=v('mf-gphone');g.Email=v('mf-gemail');g.Role=v('mf-grole');g.Notes=v('mf-gnotes');
   closeModal();renderAll();renderGuards();
-  if(!CFG.demo){showLoading('Saving…');try{await updateRow('Guards','Name',name,{Phone:g.Phone,Email:g.Email,Role:g.Role,Notes:g.Notes});toast('Guard updated ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  if(!CFG.demo){try{await updateRow('Guards','Name',name,{Phone:g.Phone,Email:g.Email,Role:g.Role,Notes:g.Notes});toast('Guard updated ✓');}catch(e){toast('Saved locally – sync failed',true);}}
   else toast('Guard updated ✓');
 }
 function editGuard(name){openModal('editGuard',name)}
@@ -1259,6 +1327,43 @@ function exportCSV(){
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='key-fob-'+new Date().toISOString().split('T')[0]+'.csv';
   a.click();
+}
+
+function toggleRecvAddress(val){
+  const addrBox=document.getElementById('recv-address-box');
+  const bankBox=document.getElementById('recv-bank-contact-box');
+  if(addrBox)addrBox.style.display=(val==='Picked up from address'||val==='Bank sent to our address')?'':'none';
+  if(bankBox)bankBox.style.display=(val==='Picked up from bank')?'':'none';
+}
+function toggleBankContact(val){
+  const box=document.getElementById('recv-bank-person-box');
+  if(box)box.style.display=(val==='yes')?'':'none';
+}
+function onGuardSelect(val){
+  const custom=document.getElementById('mf-guard-custom');
+  const contactBox=document.getElementById('guard-contact-box');
+  const roleSelect=document.getElementById('mf-role');
+  if(val==='__other__'){
+    if(custom){custom.style.display='';custom.focus();}
+    if(contactBox)contactBox.innerHTML='';
+  } else {
+    if(custom)custom.style.display='none';
+    // Show contact info
+    showGuardContact(val,'guard-contact-box');
+    // Auto-fill role from guards database
+    const g=getGuardInfo(val);
+    if(g&&g.Role&&roleSelect){
+      for(let i=0;i<roleSelect.options.length;i++){
+        if(roleSelect.options[i].value===g.Role){roleSelect.selectedIndex=i;break;}
+      }
+    }
+  }
+}
+function toggleOtherRole(val){
+  const custom=document.getElementById('mf-role-custom');
+  if(!custom)return;
+  custom.style.display=val==='Other'?'':'none';
+  if(val==='Other')custom.focus();
 }
 </script>
 </body>
