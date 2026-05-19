@@ -202,8 +202,8 @@ tbody tr:hover td{background:#faf8f4}
 .del-btn{padding:3px 9px;border:1px solid #e0b0a0;border-radius:var(--r);background:none;font-family:var(--ff);font-size:11px;color:var(--accent);cursor:pointer;transition:background .12s;margin-right:3px}
 .del-btn:hover{background:#fdf0ed}
 .sync-live{display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,.55);font-family:var(--mono)}
-.photo-gallery{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
-.photo-gallery img{width:80px;height:80px;object-fit:cover;border-radius:var(--r);border:1px solid var(--border);cursor:pointer}
+.photo-gallery{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.photo-gallery img{width:90px;height:90px;object-fit:cover;border-radius:var(--r);border:1px solid var(--border);cursor:pointer;flex-shrink:0}
 .photo-gallery img:hover{opacity:.85}
 </style>
 </head>
@@ -743,7 +743,8 @@ function openModal(type,id){
   const m=document.getElementById('modal-body');
   const clientOpts=clients.map(c=>`<option>${c.Name}</option>`).join('')+(clients.length?'':`<option>CIBC</option><option>RBC</option>`);
   const guardOpts=getGuards().map(g=>`<option>${g}</option>`).join('');
-  const availableKeys=keys.filter(k=>k.Status==='With Staff'&&k.HeldByRole&&['Manager','Supervisor'].includes(k.HeldByRole));
+  // All keys that are NOT currently issued to a guard — computed fresh every time
+  const availableKeys=keys.filter(k=>k.Status!=='Issued'&&k.Status!=='Overdue'&&k.Status!=='Flagged');
   const issuedKeys=keys.filter(k=>k.HeldBy);
 
   if(type==='addGuard'){
@@ -858,7 +859,7 @@ function openModal(type,id){
       Array.from(this.files).forEach(f=>{
         const r=new FileReader();r.onload=e=>{
           const img=document.createElement('img');img.src=e.target.result;
-          img.style.cssText='width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid var(--border)';
+          img.style.cssText='width:90px;height:90px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer';
           prev.appendChild(img);
         };r.readAsDataURL(f);
       });
@@ -1002,8 +1003,8 @@ function openModal(type,id){
     m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
     ${k.Photo?(()=>{
       const photos=k.Photo.split('||PHOTO||').filter(p=>p);
-      if(photos.length===1)return `<img src="${photos[0]}" style="width:100%;max-height:180px;object-fit:cover;border-radius:var(--r2);margin-bottom:1rem;border:1px solid var(--border)">`;
-      return `<div class="photo-gallery" style="margin-bottom:1rem">${photos.map(p=>`<img src="${p}" onclick="window.open('${p}')" title="Click to enlarge">`).join('')}</div>`;
+      if(photos.length===1)return `<img src="${photos[0]}" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r2);margin-bottom:1rem;border:1px solid var(--border);background:var(--off)" onclick="window.open('${photos[0]}')" title="Click to enlarge">`;
+      return `<div class="photo-gallery" style="margin-bottom:1rem">${photos.map(p=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover" onclick="window.open('${p}')" title="Click to enlarge">`).join('')}</div>`;
     })():''}
     <div class="modal-detail">
       <table>
