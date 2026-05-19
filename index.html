@@ -417,17 +417,31 @@ function demoAudit(){
 // ── INIT ──────────────────────────────────────────
 window.onload=()=>{
   const s=localStorage.getItem('kft_config');
-  if(s){CFG=JSON.parse(s);showApp();loadData();}
+  if(s){
+    try{CFG=JSON.parse(s);}catch(e){localStorage.removeItem('kft_config');return;}
+    showApp();
+    setTimeout(()=>loadData(),100);
+  }
 };
 function startApp(){
   const url=document.getElementById('cfg-url').value.trim();
   const name=document.getElementById('cfg-name').value.trim();
   const org=document.getElementById('cfg-org').value.trim();
-  if(!url){toast('Enter the Apps Script URL',true);return}
-  if(!name){toast('Enter your name',true);return}
+  if(!url){
+    document.getElementById('cfg-url').style.borderColor='var(--accent)';
+    document.getElementById('cfg-url').placeholder='⚠ Please enter your Apps Script URL';
+    return;
+  }
+  if(!name){
+    document.getElementById('cfg-name').style.borderColor='var(--accent)';
+    document.getElementById('cfg-name').placeholder='⚠ Please enter your name';
+    return;
+  }
   CFG={url,name,org:org||'Xtreme Security',demo:false};
   localStorage.setItem('kft_config',JSON.stringify(CFG));
-  showApp();loadData();
+  showApp();
+  // Load data after app is visible — never block the UI
+  setTimeout(()=>loadData(),100);
 }
 function loadDemo(){
   CFG={url:'',name:'Demo Manager',org:'Xtreme Security Inc.',demo:true};
@@ -453,7 +467,7 @@ async function apiCall(payload){
 async function loadData(silent=false){
   if(CFG.demo){renderAll();return}
   syncStatus('syncing');
-  if(!silent)showLoading('Fetching from Google Sheets…');
+  if(!silent)showLoading('Connecting to Google Sheets…');
   try{
     const d=await apiCall({action:'getAll'});
     keys=d.keys||[];audit=d.audit||[];clients=d.clients||[];guards=d.guards||[];
@@ -462,9 +476,17 @@ async function loadData(silent=false){
     const ts=now.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     const el=document.getElementById('last-sync-time');
     if(el)el.textContent=ts;
-    if(!silent)toast('Refreshed ✓');
-  }catch(e){syncStatus('error');if(!silent)toast('Cannot reach Google Sheet',true);}
-  finally{if(!silent)hideLoading();}
+    if(!silent)toast('Connected ✓ Data loaded');
+  }catch(e){
+    syncStatus('error');
+    // Show the app anyway with empty state — never block the user
+    renderAll();
+    if(!silent)toast('Could not reach Google Sheet. Check your Apps Script URL in ⚙ settings.',true);
+    console.error('loadData error:',e);
+  }
+  finally{
+    hideLoading(); // ALWAYS hide loading, no matter what
+  }
 }
 
 // Auto-refresh every 30 seconds
