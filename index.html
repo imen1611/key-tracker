@@ -843,12 +843,16 @@ function openModal(type,id){
       <div class="fg"><label>Branch / location</label><input id="mf-loc" placeholder="e.g. CIBC Branch – Laval"></div>
       <div class="fg"><label>How received</label>
         <select id="mf-recv" onchange="toggleRecvAddress(this.value)">
+          <option value="">— Select how it was received —</option>
           <option value="Picked up from bank">Picked up from bank</option>
           <option value="Picked up from address">Picked up from address</option>
           <option value="Bank sent to our address">Bank sent to our address</option>
         </select>
       </div>
       <div id="recv-bank-contact-box" style="display:none">
+        <div class="fg"><label>Bank address</label>
+          <input id="mf-bank-addr" placeholder="e.g. 1155 René-Lévesque Blvd W, Montreal">
+        </div>
         <div class="fg"><label>Was anyone present at the bank?</label>
           <select id="mf-bank-present" onchange="toggleBankContact(this.value)">
             <option value="yes">Yes — someone was there</option>
@@ -862,7 +866,9 @@ function openModal(type,id){
         </div>
       </div>
       <div id="recv-address-box" style="display:none">
-        <div class="fg"><label>Address</label><input id="mf-recv-addr" placeholder="Enter the pickup / delivery address"></div>
+        <div class="fg"><label>Pickup / delivery address</label>
+          <input id="mf-recv-addr" placeholder="Enter the full address">
+        </div>
       </div>
       <div class="fg"><label>Photos of key / fob <span style="font-weight:400;color:var(--muted)">(optional — select multiple)</span></label>
         <input type="file" id="mf-photo" accept="image/*" multiple style="font-family:var(--ff);font-size:13px;padding:6px;width:100%">
@@ -1023,6 +1029,43 @@ function openModal(type,id){
       <button class="btn-action green" onclick="doCheck('${id}')">Record check</button>
     </div>`;
   }
+  else if(type==='editKey'){
+    const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
+    if(!k)return;
+    const cOpts=clients.map(c=>`<option${c.Name===k.Client?' selected':''}>${c.Name}</option>`).join('')+(clients.length?'':`<option>CIBC</option><option>RBC</option>`);
+    m.innerHTML=`<h3>Edit key / fob — ${k.Transit} / ${k.KeyNumber}</h3>
+    <div class="mf">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label>Transit #</label><input id="ef-transit" value="${k.Transit||''}"></div>
+        <div class="fg"><label>Key / Fob number</label><input id="ef-keynum" value="${k.KeyNumber||''}"></div>
+      </div>
+      <div class="fg"><label>Type</label>
+        <select id="ef-type">
+          <option${k.Type==='Key'?' selected':''}>Key</option>
+          <option${k.Type==='Fob'?' selected':''}>Fob</option>
+        </select>
+      </div>
+      <div class="fg"><label>Client</label><select id="ef-client">${cOpts}</select></div>
+      <div class="fg"><label>Branch / location</label><input id="ef-loc" value="${k.Location||''}"></div>
+      <div class="fg"><label>Notes</label><textarea id="ef-notes">${k.Notes||''}</textarea></div>
+      ${k.Photo?`<div class="fg"><label>Current photo(s)</label>
+        <div class="photo-gallery">${k.Photo.split('||PHOTO||').filter(p=>p).map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in" onclick="openPhotoLightbox('${p}','${k.Transit}_${k.KeyNumber}_${i+1}')">`).join('')}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">To replace photos, upload new ones below</div>
+      </div>`:''}
+      <div class="fg"><label>Replace / add photos <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+        <input type="file" id="ef-photo" accept="image/*" multiple style="font-family:var(--ff);font-size:13px;padding:6px;width:100%">
+        <div id="ef-photo-preview" class="photo-gallery" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="openModal('view','${id}')">← Back</button>
+      <button class="btn-action" onclick="doEditKey('${id}')">Save changes</button>
+    </div>
+    <script>document.getElementById('ef-photo').onchange=function(){
+      const prev=document.getElementById('ef-photo-preview');prev.innerHTML='';
+      Array.from(this.files).forEach(f=>{const r=new FileReader();r.onload=e=>{const img=document.createElement('img');img.src=e.target.result;img.style.cssText='width:90px;height:90px;object-fit:cover;border-radius:4px;border:1px solid var(--border)';prev.appendChild(img);};r.readAsDataURL(f);});
+    }<\/script>`;
+  }
   else if(type==='view'){
     const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
     if(!k)return;
@@ -1068,10 +1111,12 @@ function openModal(type,id){
       }).join('')}
     </div>`:''}
     <div class="detail-actions">
+      <button class="btn-action" onclick="closeModal();openModal('editKey','${tid}')">✏️ Edit</button>
       ${k.HeldBy?`<button class="btn-action" onclick="closeModal();openModal('return','${tid}')">Log Return</button>`:''}
       ${needsCheck(k)?`<button class="btn-action green" onclick="closeModal();openModal('check','${tid}')">Record Check</button>`:''}
-      ${k.Status!=='Flagged'?`<button class="btn-action red" onclick="doFlag('${tid}')">🚩 Flag missing</button>`:`<button class="btn-action" onclick="doUnflag('${tid}')">Unflag</button>`}
+      ${k.Status!=='Flagged'?`<button class="btn-action red" onclick="doFlag('${tid}')">🚩 Flag</button>`:`<button class="btn-action" onclick="doUnflag('${tid}')">Unflag</button>`}
       ${!k.HeldBy?`<button class="btn-action" onclick="closeModal();openModal('issue')">Issue</button>`:''}
+      <button class="del-btn" style="padding:5px 14px;height:32px" onclick="confirmDelete('key','${tid}')">🗑 Delete</button>
       <button class="btn-outline" onclick="closeModal()">Close</button>
     </div>`;
   }
@@ -1106,14 +1151,19 @@ function editClient(name){openModal('editClient',name)}
 async function doAddKey(){
   const transit=v('mf-transit'),keynum=v('mf-keynum'),type=v('mf-type'),client=v('mf-client'),loc=v('mf-loc'),notes=v('mf-notes'),recv=v('mf-recv');
   const recvAddr=v('mf-recv-addr');
+  const bankAddr=v('mf-bank-addr');
   const bankPresent=v('mf-bank-present');
   const bankPerson=v('mf-bank-person');
+  if(!recv){toast('Please select how the key was received',true);return}
   let recvNote=recv;
   if(recv==='Picked up from bank'){
-    if(bankPresent==='no')recvNote=`${recv} — no one present`;
-    else if(bankPerson)recvNote=`${recv} — received from: ${bankPerson}`;
+    const parts=[];
+    if(bankAddr)parts.push('Bank address: '+bankAddr);
+    if(bankPresent==='no')parts.push('no one present');
+    else if(bankPerson)parts.push('received from: '+bankPerson);
+    if(parts.length)recvNote=recv+' — '+parts.join(', ');
   } else if(recvAddr){
-    recvNote=`${recv} — Address: ${recvAddr}`;
+    recvNote=recv+' — Address: '+recvAddr;
   }
   if(!transit||!loc){toast('Transit # and location required',true);return}
   if(!keynum){toast('Key / Fob number is required',true);return}
@@ -1275,6 +1325,38 @@ async function doUnflag(id){
   }
 }
 
+async function doEditKey(oldTid){
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===oldTid||x.Transit===oldTid||x.KeyNumber===oldTid);
+  if(!k)return;
+  const newTransit=v('ef-transit')||k.Transit;
+  const newKeynum=v('ef-keynum')||k.KeyNumber;
+  const newType=v('ef-type');
+  const newClient=v('ef-client');
+  const newLoc=v('ef-loc');
+  const newNotes=v('ef-notes');
+  // Handle new photos — if none uploaded keep existing
+  let newPhoto=k.Photo||'';
+  const photoFile=document.getElementById('ef-photo');
+  if(photoFile&&photoFile.files.length>0){
+    const promises=Array.from(photoFile.files).map(f=>new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(f);}));
+    const results=await Promise.all(promises);
+    newPhoto=results.join('||PHOTO||');
+  }
+  // Update local object
+  const oldTransit=k.Transit;
+  const oldKeynum=k.KeyNumber;
+  k.Transit=newTransit;k.KeyNumber=newKeynum;k.Type=newType;
+  k.Client=newClient;k.Location=newLoc;k.Notes=newNotes;k.Photo=newPhoto;
+  const logRow={Timestamp:new Date().toISOString(),Action:'Edited',KeyID:newTransit+'-'+newKeynum,Guard:'',Note:`Edited by ${CFG.name}. Fields updated: transit, key#, type, client, location, notes/photos.`,Manager:CFG.name};
+  audit.unshift(logRow);
+  closeModal();renderAll();toast('Key/Fob updated ✓');
+  if(!CFG.demo){
+    try{
+      await updateRow('Keys','Transit',oldTransit,{Transit:newTransit,KeyNumber:newKeynum,Type:newType,Client:newClient,Location:newLoc,Notes:newNotes,Photo:newPhoto},oldKeynum);
+      await writeRow('AuditLog',logRow);
+    }catch(e){toast('Saved locally – Sheet sync failed',true);}
+  }
+}
 function quickFlag(id){doFlag(id)}
 
 function confirmDelete(type,id){
@@ -1447,6 +1529,14 @@ function toggleRecvAddress(val){
   const bankBox=document.getElementById('recv-bank-contact-box');
   if(addrBox)addrBox.style.display=(val==='Picked up from address'||val==='Bank sent to our address')?'':'none';
   if(bankBox)bankBox.style.display=(val==='Picked up from bank')?'':'none';
+  // Reset sub-fields when switching options
+  if(val!=='Picked up from bank'){
+    const bp=document.getElementById('mf-bank-addr');if(bp)bp.value='';
+    const bpers=document.getElementById('mf-bank-person');if(bpers)bpers.value='';
+  }
+  if(val!=='Picked up from address'&&val!=='Bank sent to our address'){
+    const ra=document.getElementById('mf-recv-addr');if(ra)ra.value='';
+  }
 }
 function toggleBankContact(val){
   const box=document.getElementById('recv-bank-person-box');
