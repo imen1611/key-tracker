@@ -293,7 +293,7 @@ tbody tr:hover td{background:#faf8f4}
         <input type="text" id="q" placeholder="Search ID, location, guard…" oninput="renderTable()">
         <select id="f-status" onchange="renderTable()">
           <option value="">All statuses</option>
-          <option>With Staff</option><option>Issued</option><option>Overdue</option><option>Flagged</option>
+          <option>With Staff</option><option>Issued</option><option>Overdue</option><option>Flagged</option><option>Returned to Bank</option>
         </select>
         <select id="f-client" onchange="renderTable()"><option value="">All clients</option></select>
         <select id="f-type" onchange="renderTable()">
@@ -526,6 +526,7 @@ function checkOverdue(){
 function needsCheck(k){
   if(k.Status==='With Staff'&&!k.HeldBy)return false;
 if(!k.PickupDate&&!k.HeldBy)return false;
+if(k.Status==='Returned to Bank')return false;
   const refDate=k.LastCheckDate||k.PickupDate;
   return daysOut(refDate)>=14;
 }
@@ -571,7 +572,7 @@ function daysOut(dateStr){
 }
 
 function statusBadge(s,checkDue){
-  const map={'With Staff':'b-ok','Issued':'b-out','Overdue':'b-warn','Flagged':'b-danger'};
+  const map={'With Staff':'b-ok','Issued':'b-out','Overdue':'b-warn','Flagged':'b-danger','Returned to Bank':'b-ok'};
   let html=`<span class="badge ${map[s]||'b-ok'}"><span class="dot"></span>${s}</span>`;
   if(checkDue)html+=' <span class="badge b-remind" style="font-size:10px">⏰ check due</span>';
   return html;
@@ -877,9 +878,7 @@ function openModal(type,id){
         <select id="mf-guard" onchange="onGuardSelect(this.value)">
           <option value="">— Select a guard —</option>
           ${guardDropOpts}
-          <option value="__other__">+ Other (not in guards list)</option>
         </select>
-        <input id="mf-guard-custom" placeholder="Enter name manually" style="display:none;margin-top:6px;width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
         <div id="guard-contact-box" style="margin-top:4px"></div>
       </div>
       <div class="fg"><label>Recipient role</label>
@@ -901,6 +900,8 @@ function openModal(type,id){
   }
   else if(type==='return'){
     const retOpts=issuedKeys.map(k=>`<option value="${k.Transit||k.KeyNumber}">${k.Transit}/${k.KeyNumber} — ${k.HeldBy||'?'} — ${k.Location}</option>`).join('')||'<option>None currently out</option>';
+    // Build client options for bank return
+    const clientOpts2=clients.map(c=>`<option value="${c.Name}">${c.Name}</option>`).join('')||'<option>CIBC</option><option>RBC</option>';
     m.innerHTML=`<h3>Log key / fob return</h3>
     <div class="mf">
       <div class="fg"><label>Key / Fob being returned</label>
@@ -910,9 +911,31 @@ function openModal(type,id){
         <datalist id="gl2">${guardOpts}</datalist>
         <div id="ret-contact-box"></div>
       </div>
-      <div class="fg"><label>Returned TO (who receives it)</label>
-        <input id="mf-returnedto" list="gl3" placeholder="Manager / supervisor name receiving it">
-        <datalist id="gl3">${getGuards().map(g=>`<option>${g}</option>`).join('')}</datalist>
+      <div class="fg"><label>Returned to</label>
+        <select id="mf-return-dest" onchange="toggleReturnDest(this.value)">
+          <option value="staff">Our staff (manager / supervisor)</option>
+          <option value="bank">Client / bank</option>
+        </select>
+      </div>
+      <div id="ret-staff-box">
+        <div class="fg"><label>Staff name receiving it</label>
+          <input id="mf-returnedto" list="gl3" placeholder="Manager / supervisor name">
+          <datalist id="gl3">${getGuards().map(g=>`<option>${g}</option>`).join('')}</datalist>
+        </div>
+      </div>
+      <div id="ret-bank-box" style="display:none">
+        <div class="fg"><label>Which client / bank</label>
+          <select id="mf-return-client">${clientOpts2}</select>
+        </div>
+        <div class="fg"><label>Bank contact name (person who received it)</label>
+          <input id="mf-bank-contact" placeholder="e.g. Pierre Gagnon — CIBC Security">
+        </div>
+        <div class="fg"><label>Was anyone present?</label>
+          <select id="mf-bank-present-ret">
+            <option value="yes">Yes — handed to someone</option>
+            <option value="no">No — left at desk / dropped off</option>
+          </select>
+        </div>
       </div>
       <div class="fg"><label>Return date</label>
         <input type="date" id="mf-returndate" value="${new Date().toISOString().split('T')[0]}"></div>
@@ -933,6 +956,10 @@ function openModal(type,id){
     function prefillReturnedBy(transit){
       const k=keys.find(x=>(x.Transit===transit||x.KeyNumber===transit));
       if(k&&k.HeldBy){const el=document.getElementById('mf-guard');if(el&&!el.value)el.value=k.HeldBy;showGuardContact(k.HeldBy,'ret-contact-box');}
+    }
+    function toggleReturnDest(val){
+      document.getElementById('ret-staff-box').style.display=val==='staff'?'':'none';
+      document.getElementById('ret-bank-box').style.display=val==='bank'?'':'none';
     }
     <\/script>`;
   }
@@ -1074,9 +1101,7 @@ async function doAddKey(){
 }
 async function doIssue(){
   const transit=v('mf-key');
-  const guardSel=document.getElementById('mf-guard');
-  const guardVal=guardSel?guardSel.value:'';
-  const guard=guardVal==='__other__'?v('mf-guard-custom'):guardVal;
+  const guard=v('mf-guard');
   const roleSel=v('mf-role');
   const role=roleSel==='Other'?v('mf-role-custom'):roleSel;
   const note=v('mf-notes'),pickup=v('mf-pickup'),pickupDate=v('mf-pickupdate')||new Date().toISOString().split('T')[0];
@@ -1089,16 +1114,47 @@ async function doIssue(){
   else toast('Issued ✓');
 }
 async function doReturn(){
-  const transit=v('mf-key'),returnedBy=v('mf-guard'),returnedTo=v('mf-returnedto'),note=v('mf-notes'),cond=v('mf-cond'),returnDate=v('mf-returndate')||new Date().toISOString().split('T')[0];
+  const transit=v('mf-key'),returnedBy=v('mf-guard'),note=v('mf-notes'),cond=v('mf-cond');
+  const returnDate=v('mf-returndate')||new Date().toISOString().split('T')[0];
+  const dest=v('mf-return-dest')||'staff';
   if(!transit){toast('Select a key/fob',true);return}
-  if(!returnedTo){toast('Enter who is receiving the key',true);return}
   const k=keys.find(x=>x.Transit===transit||x.KeyNumber===transit);if(!k)return;
-  const prevHolder=k.HeldBy;
-  k.Status='With Staff';k.HeldBy=returnedTo;k.HeldByRole='Manager';k.ReturnedTo=returnedTo;k.PickupDate=returnDate;k.LastCheckDate=returnDate;
-  const logRow={Timestamp:new Date().toISOString(),Action:'Returned',KeyID:k.Transit,Guard:returnedBy,Note:`Returned by: ${returnedBy} → to: ${returnedTo}. Date: ${returnDate}. Condition: ${cond}. ${note}`,Manager:CFG.name};
+
+  let newStatus,newHeldBy,newHeldByRole,returnedTo,logNote;
+
+  if(dest==='bank'){
+    const bankClient=v('mf-return-client');
+    const bankContact=v('mf-bank-contact');
+    const bankPresent=v('mf-bank-present-ret');
+    if(!bankClient){toast('Select which client/bank',true);return}
+    newStatus='Returned to Bank';
+    newHeldBy='';
+    newHeldByRole='';
+    returnedTo=bankClient;
+    const contactNote=bankPresent==='no'?'left at desk / no one present':(bankContact?`handed to: ${bankContact}`:'no contact name recorded');
+    logNote=`Returned to bank (${bankClient}) by: ${returnedBy||'—'}. ${contactNote}. Date: ${returnDate}. Condition: ${cond}. ${note}`;
+  } else {
+    const staffName=v('mf-returnedto');
+    if(!staffName){toast('Enter who is receiving the key',true);return}
+    newStatus='With Staff';
+    newHeldBy=staffName;
+    newHeldByRole='Manager';
+    returnedTo=staffName;
+    logNote=`Returned by: ${returnedBy||'—'} → to staff: ${staffName}. Date: ${returnDate}. Condition: ${cond}. ${note}`;
+  }
+
+  k.Status=newStatus;k.HeldBy=newHeldBy;k.HeldByRole=newHeldByRole;
+  k.ReturnedTo=returnedTo;k.PickupDate=returnDate;k.LastCheckDate=returnDate;
+
+  const logRow={Timestamp:new Date().toISOString(),Action:'Returned',KeyID:k.Transit,Guard:returnedBy,Note:logNote,Manager:CFG.name};
   audit.unshift(logRow);closeModal();renderAll();
-  if(!CFG.demo){try{await updateRow('Keys','Transit',k.Transit,{Status:'With Staff',HeldBy:returnedTo,HeldByRole:'Manager',ReturnedTo:returnedTo,PickupDate:returnDate,LastCheckDate:returnDate});await writeRow('AuditLog',logRow);toast('Return logged ✓');}catch(e){toast('Saved locally – sync failed',true);}}
-  else toast('Return logged ✓');
+  if(!CFG.demo){
+    try{
+      await updateRow('Keys','Transit',k.Transit,{Status:newStatus,HeldBy:newHeldBy,HeldByRole:newHeldByRole,ReturnedTo:returnedTo,PickupDate:returnDate,LastCheckDate:returnDate});
+      await writeRow('AuditLog',logRow);
+      toast('Return logged ✓');
+    }catch(e){toast('Saved locally – sync failed',true);}
+  } else toast('Return logged ✓');
 }
 async function doCheck(keyId){
   const k=keys.find(x=>x.Transit===keyId||x.KeyNumber===keyId);if(!k)return;
@@ -1340,22 +1396,14 @@ function toggleBankContact(val){
   if(box)box.style.display=(val==='yes')?'':'none';
 }
 function onGuardSelect(val){
-  const custom=document.getElementById('mf-guard-custom');
   const contactBox=document.getElementById('guard-contact-box');
   const roleSelect=document.getElementById('mf-role');
-  if(val==='__other__'){
-    if(custom){custom.style.display='';custom.focus();}
-    if(contactBox)contactBox.innerHTML='';
-  } else {
-    if(custom)custom.style.display='none';
-    // Show contact info
-    showGuardContact(val,'guard-contact-box');
-    // Auto-fill role from guards database
-    const g=getGuardInfo(val);
-    if(g&&g.Role&&roleSelect){
-      for(let i=0;i<roleSelect.options.length;i++){
-        if(roleSelect.options[i].value===g.Role){roleSelect.selectedIndex=i;break;}
-      }
+  if(!val){if(contactBox)contactBox.innerHTML='';return;}
+  showGuardContact(val,'guard-contact-box');
+  const g=getGuardInfo(val);
+  if(g&&g.Role&&roleSelect){
+    for(let i=0;i<roleSelect.options.length;i++){
+      if(roleSelect.options[i].value===g.Role){roleSelect.selectedIndex=i;break;}
     }
   }
 }
