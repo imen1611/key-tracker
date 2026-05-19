@@ -1,0 +1,1146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Key & Fob Custody Tracker — Xtreme Security</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --black:#0d0d0d;--white:#f7f5f0;--off:#f0ede6;--surface:#ffffff;
+  --border:#d8d3c8;--border2:#c5bfb0;--muted:#8a8478;--text:#1a1916;
+  --accent:#c8401a;--accent2:#1a5c8a;
+  --ok:#1e6e3a;--ok-bg:#edf7f1;
+  --warn:#8a5a0a;--warn-bg:#fef8ed;
+  --danger:#8a1a1a;--danger-bg:#fdf0f0;
+  --blue:#1a4a7a;--blue-bg:#edf3fa;
+  --purple:#4a1a7a;--purple-bg:#f3f0fa;
+  --yellow:#7a5a00;--yellow-bg:#fffbea;
+  --ff:'IBM Plex Sans',sans-serif;--mono:'IBM Plex Mono',monospace;
+  --r:4px;--r2:8px;--sh:0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.05);
+}
+html{font-size:14px}
+body{background:var(--off);font-family:var(--ff);color:var(--text);min-height:100vh}
+
+/* SETUP */
+#setup-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem}
+.setup-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:2.5rem;max-width:580px;width:100%;box-shadow:var(--sh)}
+.setup-logo{display:flex;align-items:center;gap:12px;margin-bottom:2rem}
+.setup-logo img{width:52px;height:52px;object-fit:contain}
+.setup-logo h1{font-size:20px;font-weight:600;letter-spacing:-.3px}
+.setup-logo p{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.setup-card > p{color:var(--muted);font-size:13px;line-height:1.6;margin-bottom:1.5rem}
+.setup-steps{margin-bottom:2rem}
+.setup-step{display:flex;gap:14px;margin-bottom:1rem}
+.step-num{width:24px;height:24px;border-radius:50%;background:var(--black);color:var(--white);font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+.step-text{font-size:13px;line-height:1.6}
+.step-text a{color:var(--accent2);text-decoration:none}
+.step-text a:hover{text-decoration:underline}
+.step-text code{font-family:var(--mono);background:var(--off);padding:1px 6px;border-radius:3px;font-size:12px}
+.fg{margin-bottom:1rem}
+.fg label{display:block;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.fg input,.fg select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--mono);font-size:13px;color:var(--text);background:var(--surface);outline:none;transition:border-color .15s}
+.fg input:focus,.fg select:focus{border-color:var(--black)}
+.btn-primary{width:100%;padding:11px;background:var(--black);color:var(--white);border:none;border-radius:var(--r);font-family:var(--ff);font-size:14px;font-weight:500;cursor:pointer;transition:opacity .15s}
+.btn-primary:hover{opacity:.85}
+.setup-note{margin-top:1rem;font-size:12px;color:var(--muted);text-align:center}
+.setup-note a{color:var(--accent2);cursor:pointer}
+
+/* APP */
+#app{display:none}
+header{background:var(--black);color:var(--white);padding:0 1.5rem;display:flex;align-items:center;justify-content:space-between;height:54px;position:sticky;top:0;z-index:100;gap:12px}
+.hdr-left{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.hdr-logo{width:36px;height:36px;display:flex;align-items:center;justify-content:center}
+.hdr-logo img{width:36px;height:36px;object-fit:contain}
+.hdr-title{font-size:14px;font-weight:500}
+.hdr-sub{font-size:11px;color:rgba(255,255,255,.4);font-family:var(--mono)}
+.hdr-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sync-badge{display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,.55);font-family:var(--mono)}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:#4caf50}
+.sync-dot.syncing{background:#ff9800;animation:pulse 1s infinite}
+.sync-dot.error{background:#f44336}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.btn-hdr{padding:5px 12px;border:1px solid rgba(255,255,255,.2);border-radius:var(--r);background:transparent;color:var(--white);font-family:var(--ff);font-size:12px;cursor:pointer;transition:background .15s;white-space:nowrap}
+.btn-hdr:hover{background:rgba(255,255,255,.1)}
+.btn-hdr.accent{background:var(--accent);border-color:var(--accent)}
+.btn-hdr.accent:hover{opacity:.85}
+
+/* REMINDER BANNER */
+.reminder-banner{background:var(--yellow-bg);border:1px solid #e8c84a;border-radius:var(--r2);padding:12px 16px;margin:1rem 0;display:flex;align-items:flex-start;gap:12px}
+.reminder-banner.hidden{display:none}
+.rb-icon{font-size:18px;flex-shrink:0;margin-top:1px}
+.rb-body{flex:1}
+.rb-title{font-size:13px;font-weight:600;color:var(--yellow);margin-bottom:4px}
+.rb-list{font-size:12px;color:var(--text);line-height:1.8}
+.rb-list span{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:1px 8px;margin:2px 4px 2px 0;font-family:var(--mono);font-size:11px}
+.rb-dismiss{padding:4px 12px;border:1px solid var(--border2);border-radius:var(--r);background:var(--surface);font-size:12px;cursor:pointer;color:var(--text);white-space:nowrap;flex-shrink:0}
+.rb-dismiss:hover{background:var(--off)}
+
+main{max-width:1320px;margin:0 auto;padding:1.25rem 1.5rem}
+.stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:1.25rem}
+@media(max-width:1000px){.stats{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:.9rem 1.1rem}
+.stat-label{font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:5px}
+.stat-val{font-size:26px;font-weight:300;font-family:var(--mono);color:var(--text)}
+.stat-val.ok{color:var(--ok)}
+.stat-val.warn{color:var(--warn)}
+.stat-val.danger{color:var(--danger)}
+.stat-val.blue{color:var(--blue)}
+.stat-val.purple{color:var(--purple)}
+
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:1.25rem}
+.tab-btn{padding:8px 18px;background:none;border:none;border-bottom:2px solid transparent;font-family:var(--ff);font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;transition:color .15s,border-color .15s;margin-bottom:-1px;white-space:nowrap}
+.tab-btn.active{color:var(--text);border-bottom-color:var(--black)}
+.tab-btn:hover:not(.active){color:var(--text)}
+.tab-badge{display:inline-block;background:var(--accent);color:white;border-radius:10px;font-size:10px;padding:1px 6px;margin-left:5px;font-weight:600}
+
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:1rem}
+.toolbar input,.toolbar select{padding:6px 10px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;color:var(--text);background:var(--surface);outline:none;transition:border-color .15s;height:32px}
+.toolbar input:focus,.toolbar select:focus{border-color:var(--black)}
+.toolbar input{min-width:200px}
+.spacer{flex:1}
+.btn-outline{padding:5px 13px;border:1px solid var(--border2);border-radius:var(--r);background:var(--surface);color:var(--text);font-family:var(--ff);font-size:12px;cursor:pointer;transition:background .15s;height:32px;display:flex;align-items:center;gap:5px}
+.btn-outline:hover{background:var(--off)}
+.btn-action{padding:5px 14px;border:none;border-radius:var(--r);background:var(--black);color:var(--white);font-family:var(--ff);font-size:12px;font-weight:500;cursor:pointer;transition:opacity .15s;height:32px;display:flex;align-items:center;gap:5px}
+.btn-action:hover{opacity:.8}
+.btn-action.red{background:var(--accent)}
+.btn-action.green{background:var(--ok)}
+
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:860px}
+thead th{padding:9px 13px;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);background:var(--off);border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+tbody td{padding:10px 13px;border-bottom:1px solid var(--border);vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:#faf8f4}
+.mono{font-family:var(--mono);font-size:12px}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500}
+.b-ok{background:var(--ok-bg);color:var(--ok)}
+.b-out{background:var(--blue-bg);color:var(--blue)}
+.b-warn{background:var(--warn-bg);color:var(--warn)}
+.b-danger{background:var(--danger-bg);color:var(--danger)}
+.b-remind{background:var(--yellow-bg);color:var(--yellow)}
+.dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+.act-btn{padding:3px 9px;border:1px solid var(--border);border-radius:var(--r);background:none;font-family:var(--ff);font-size:11px;color:var(--text);cursor:pointer;transition:background .12s;margin-right:3px}
+.act-btn:hover{background:var(--off)}
+.act-btn.red{color:var(--accent);border-color:#e0b0a0}
+.act-btn.red:hover{background:#fdf0ed}
+.empty-row td{text-align:center;padding:3rem;color:var(--muted);font-size:13px}
+
+/* AUDIT LOG */
+.audit-list{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden}
+.audit-item{display:flex;gap:14px;padding:12px 16px;border-bottom:1px solid var(--border);align-items:flex-start}
+.audit-item:last-child{border-bottom:none}
+.audit-icon{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.audit-icon svg{width:14px;height:14px;stroke-width:2;fill:none}
+.ai-issued{background:var(--blue-bg)} .ai-issued svg{stroke:var(--blue)}
+.ai-returned{background:var(--ok-bg)} .ai-returned svg{stroke:var(--ok)}
+.ai-flagged{background:var(--danger-bg)} .ai-flagged svg{stroke:var(--danger)}
+.ai-added{background:var(--purple-bg)} .ai-added svg{stroke:var(--purple)}
+.ai-remind{background:var(--yellow-bg)} .ai-remind svg{stroke:var(--yellow)}
+.audit-body{flex:1}
+.audit-body strong{font-weight:500;font-size:13px}
+.audit-meta{font-size:12px;color:var(--muted);margin-top:2px}
+.audit-time{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;margin-top:2px}
+
+/* CLIENTS TAB */
+.clients-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.client-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:1.2rem;display:flex;flex-direction:column;gap:8px}
+.client-card-top{display:flex;align-items:center;justify-content:space-between}
+.client-name{font-size:15px;font-weight:600}
+.client-meta{font-size:12px;color:var(--muted);line-height:1.5}
+.client-stats{display:flex;gap:8px;margin-top:4px}
+.cs-pill{font-size:11px;font-family:var(--mono);background:var(--off);border:1px solid var(--border);border-radius:3px;padding:2px 8px}
+.client-actions{display:flex;gap:6px;margin-top:4px}
+
+/* REMINDERS TAB */
+.reminder-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:1.2rem;margin-bottom:10px;display:flex;gap:14px;align-items:flex-start}
+.reminder-card.urgent{border-left:3px solid var(--accent)}
+.reminder-card.due{border-left:3px solid var(--warn)}
+.reminder-card.ok{border-left:3px solid var(--ok)}
+.rc-icon{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:16px}
+.rc-body{flex:1}
+.rc-title{font-size:13px;font-weight:600;margin-bottom:3px}
+.rc-meta{font-size:12px;color:var(--muted);line-height:1.6}
+.rc-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:999;padding:1rem;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--surface);border-radius:12px;padding:1.75rem;width:100%;max-width:520px;max-height:92vh;overflow-y:auto;transform:translateY(12px);transition:transform .2s;box-shadow:0 8px 40px rgba(0,0,0,.2)}
+.modal-overlay.open .modal{transform:translateY(0)}
+.modal h3{font-size:16px;font-weight:600;margin-bottom:1.25rem}
+.mf .fg{margin-bottom:.9rem}
+.mf label{display:block;font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.mf input,.mf select,.mf textarea{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;color:var(--text);background:var(--surface);outline:none;transition:border-color .15s}
+.mf input:focus,.mf select:focus,.mf textarea:focus{border-color:var(--black)}
+.mf textarea{height:72px;resize:vertical}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)}
+.modal-detail table{width:100%;font-size:13px}
+.modal-detail td{padding:6px 0;border-bottom:1px solid var(--border)}
+.modal-detail td:first-child{color:var(--muted);width:130px}
+.modal-detail tr:last-child td{border-bottom:none}
+.detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)}
+.info-box{background:var(--blue-bg);border:1px solid #b5d4f4;border-radius:var(--r);padding:10px 12px;font-size:12px;color:var(--blue);line-height:1.6;margin-bottom:1rem}
+
+#toast{position:fixed;bottom:20px;right:20px;z-index:9999;background:var(--black);color:var(--white);padding:11px 18px;border-radius:var(--r2);font-size:13px;font-weight:500;transform:translateY(80px);opacity:0;transition:all .25s;max-width:320px;box-shadow:0 4px 20px rgba(0,0,0,.3)}
+#toast.show{transform:translateY(0);opacity:1}
+#toast.err{background:var(--accent)}
+.loading-overlay{position:fixed;inset:0;background:var(--off);display:flex;align-items:center;justify-content:center;z-index:9998;flex-direction:column;gap:12px}
+.loading-overlay.hide{display:none}
+.spinner{width:30px;height:30px;border:2px solid var(--border);border-top-color:var(--black);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-txt{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.section-empty{text-align:center;padding:3rem;color:var(--muted);font-size:13px}
+.tag-type{font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--off);padding:2px 6px;border-radius:3px}
+.overdue-row td{background:#fffbf5!important}
+.photo-thumb{width:36px;height:36px;object-fit:cover;border-radius:3px;border:1px solid var(--border);cursor:pointer;vertical-align:middle}
+.flagged-row td{background:#fff8f8!important}
+.remind-row td{background:#fffef0!important}
+</style>
+</head>
+<body>
+
+<!-- SETUP SCREEN -->
+<div id="setup-screen">
+  <div class="setup-card">
+    <div class="setup-logo">
+      <img src="data:image/jpeg;base64,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" alt="Xtreme Security Inc.">
+      <div>
+        <h1>Key &amp; Fob Tracker</h1>
+        <p>Xtreme Security Inc.</p>
+      </div>
+    </div>
+    <p>This app uses a <strong>Google Sheet as its live database</strong>. All records are stored there and shared across all managers in real time. You can also use demo mode to explore without setup.</p>
+    <div class="setup-steps">
+      <div class="setup-step"><div class="step-num">1</div><div class="step-text"><a href="https://docs.google.com/spreadsheets/create" target="_blank">Create a new Google Sheet</a> named <strong>Key Fob Tracker</strong>. Create 3 tabs: <code>Keys</code>, <code>AuditLog</code>, <code>Clients</code>.</div></div>
+      <div class="setup-step"><div class="step-num">2</div><div class="step-text">
+        <strong>Keys</strong> row 1: <code>Transit | KeyNumber | Type | Client | Location | Status | HeldBy | HeldByRole | PickupDate | LastCheckDate | ReturnedTo | Photo | Notes | AddedDate</code><br>
+        <strong>AuditLog</strong> row 1: <code>Timestamp | Action | KeyID | Guard | Note | Manager</code><br>
+        <strong>Clients</strong> row 1: <code>Name | ContactName | ContactPhone | ContactEmail | Address | Notes | AddedDate</code>
+      </div></div>
+      <div class="setup-step"><div class="step-num">3</div><div class="step-text">Go to <strong>Extensions → Apps Script</strong>, paste the <code>apps-script.gs</code> file, deploy as Web App (execute as Me, access Anyone). Copy the URL.</div></div>
+      <div class="setup-step"><div class="step-num">4</div><div class="step-text">Paste the URL below and enter your name.</div></div>
+    </div>
+    <div class="fg"><label>Apps Script Web App URL</label><input type="url" id="cfg-url" placeholder="https://script.google.com/macros/s/AKfycb.../exec"></div>
+    <div class="fg"><label>Your name</label><input type="text" id="cfg-name" placeholder="e.g. Marie Leblanc"></div>
+    <div class="fg"><label>Organization</label><input type="text" id="cfg-org" placeholder="e.g. Xtreme Security Inc."></div>
+    <button class="btn-primary" onclick="startApp()">Connect &amp; Open Tracker →</button>
+    <div class="setup-note">Stored in browser only &nbsp;|&nbsp; <a onclick="loadDemo()">Load demo mode (no Sheet needed)</a></div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <header>
+    <div class="hdr-left">
+      <div class="hdr-logo"><img src="data:image/jpeg;base64,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" alt="Xtreme Security"></div>
+      <div>
+        <div class="hdr-title">Key &amp; Fob Custody Tracker</div>
+        <div class="hdr-sub" id="hdr-org">Xtreme Security Inc.</div>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <div class="sync-badge"><div class="sync-dot" id="sync-dot"></div><span id="sync-label">Live</span></div>
+      <button class="btn-hdr" onclick="loadData()">↻ Refresh</button>
+      <button class="btn-hdr" onclick="openModal('addClient')">+ Client</button>
+      <button class="btn-hdr" onclick="openModal('addKey')">+ Key/Fob</button>
+      <button class="btn-hdr accent" onclick="openModal('issue')">Issue →</button>
+      <button class="btn-hdr" onclick="reconfigure()">⚙</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="stats" id="stats-row">
+      <div class="stat-card"><div class="stat-label">Total tracked</div><div class="stat-val" id="s-total">—</div></div>
+      <div class="stat-card"><div class="stat-label">With staff</div><div class="stat-val ok" id="s-in">—</div></div>
+      <div class="stat-card"><div class="stat-label">Issued</div><div class="stat-val blue" id="s-issued">—</div></div>
+      <div class="stat-card"><div class="stat-label">Overdue 30d+</div><div class="stat-val warn" id="s-over">—</div></div>
+      <div class="stat-card"><div class="stat-label">Flagged</div><div class="stat-val danger" id="s-flag">—</div></div>
+      <div class="stat-card"><div class="stat-label">Check due 14d</div><div class="stat-val purple" id="s-remind">—</div></div>
+    </div>
+
+    <!-- Reminder banner -->
+    <div class="reminder-banner hidden" id="remind-banner">
+      <div class="rb-icon">⏰</div>
+      <div class="rb-body">
+        <div class="rb-title">Bi-weekly custody checks due</div>
+        <div class="rb-list" id="remind-banner-list"></div>
+      </div>
+      <button class="rb-dismiss" onclick="document.getElementById('remind-banner').classList.add('hidden')">Dismiss</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('inventory',this)">Inventory</button>
+      <button class="tab-btn" onclick="switchTab('reminders',this)">Reminders <span class="tab-badge" id="remind-badge" style="display:none">0</span></button>
+      <button class="tab-btn" onclick="switchTab('guards',this)">Guards</button>
+      <button class="tab-btn" onclick="switchTab('clients',this)">Clients</button>
+      <button class="tab-btn" onclick="switchTab('audit',this)">Audit Log</button>
+    </div>
+
+    <!-- INVENTORY -->
+    <div id="tab-inventory">
+      <div class="toolbar">
+        <input type="text" id="q" placeholder="Search ID, location, guard…" oninput="renderTable()">
+        <select id="f-status" onchange="renderTable()">
+          <option value="">All statuses</option>
+          <option>With Staff</option><option>Issued</option><option>Overdue</option><option>Flagged</option>
+        </select>
+        <select id="f-client" onchange="renderTable()"><option value="">All clients</option></select>
+        <select id="f-type" onchange="renderTable()">
+          <option value="">Keys &amp; Fobs</option><option>Key</option><option>Fob</option>
+        </select>
+        <div class="spacer"></div>
+        <button class="btn-outline" onclick="exportCSV()">↓ CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Transit</th><th>Key #</th><th>Type</th><th>Client</th><th>Location</th><th>Status</th><th>Held By</th><th>Role</th><th>Pickup Date</th><th>Days out</th><th>Last check</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="tbl-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- REMINDERS -->
+    <div id="tab-reminders" style="display:none">
+      <div style="margin-bottom:1rem;font-size:13px;color:var(--muted)">
+        Keys/fobs issued for 14+ days without a recorded custody check. Confirm the same guard still holds it, or log a handoff.
+      </div>
+      <div id="reminders-list"></div>
+    </div>
+
+    <!-- CLIENTS -->
+    <div id="tab-clients" style="display:none">
+      <div class="toolbar">
+        <input type="text" id="client-q" placeholder="Search clients…" oninput="renderClients()">
+        <div class="spacer"></div>
+        <button class="btn-action" onclick="openModal('addClient')">+ Add Client</button>
+      </div>
+      <div class="clients-grid" id="clients-grid"></div>
+    </div>
+
+    <!-- GUARDS -->
+    <div id="tab-guards" style="display:none">
+      <div class="toolbar">
+        <input type="text" id="guard-q" placeholder="Search guards…" oninput="renderGuards()">
+        <div class="spacer"></div>
+        <button class="btn-action" onclick="openModal('addGuard')">+ Add Guard</button>
+      </div>
+      <div class="clients-grid" id="guards-grid"></div>
+    </div>
+
+    <!-- AUDIT -->
+    <div id="tab-audit" style="display:none">
+      <div class="toolbar">
+        <input type="text" id="audit-q" placeholder="Filter…" oninput="renderAudit()">
+        <select id="audit-action" onchange="renderAudit()">
+          <option value="">All actions</option>
+          <option>Issued</option><option>Returned</option><option>Flagged</option>
+          <option>Added</option><option>Unflagged</option><option>Check</option>
+        </select>
+        <div class="spacer"></div>
+        <span style="font-size:12px;color:var(--muted);font-family:var(--mono)" id="audit-count"></span>
+      </div>
+      <div class="audit-list" id="audit-list"></div>
+    </div>
+  </main>
+</div>
+
+<div class="loading-overlay hide" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-txt" id="loading-txt">Loading…</div>
+</div>
+<div id="toast"></div>
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal-body"></div>
+</div>
+
+<script>
+let CFG = { url:'', name:'Manager', org:'Xtreme Security Inc.', demo:false };
+let keys=[], audit=[], clients=[], guards=[];
+let currentTab='inventory';
+const NOW=()=>new Date();
+
+// ── DEMO DATA ──────────────────────────────────────
+function demoGuards(){
+  return [
+    {Name:'Alex Tremblay',Phone:'514-555-0301',Email:'alex.tremblay@xtremesg.com',Role:'Guard',Notes:'Downtown post specialist',AddedDate:'2024-01-20'},
+    {Name:'Carlos Reyes',Phone:'514-555-0302',Email:'carlos.reyes@xtremesg.com',Role:'Guard',Notes:'Laval & North Shore coverage',AddedDate:'2024-01-20'},
+    {Name:'Nadia Osman',Phone:'514-555-0303',Email:'nadia.osman@xtremesg.com',Role:'Guard',Notes:'RBC account lead guard',AddedDate:'2024-02-01'},
+    {Name:'Tom Wu',Phone:'514-555-0304',Email:'tom.wu@xtremesg.com',Role:'Guard',Notes:'Westmount / West Island',AddedDate:'2024-02-01'},
+    {Name:'Priya Singh',Phone:'514-555-0305',Email:'priya.singh@xtremesg.com',Role:'Mobile',Notes:'Mobile patrol – South Shore',AddedDate:'2024-02-15'},
+  ];
+}
+function demoClients(){
+  return [
+    {Name:'CIBC',ContactName:'Pierre Gagnon',ContactPhone:'514-555-0101',ContactEmail:'pierre.gagnon@cibc.com',Address:'81 Bay St, Toronto ON',Notes:'Main contact for Montreal branches',AddedDate:'2024-01-15'},
+    {Name:'RBC',ContactName:'Sandra Tremblay',ContactPhone:'514-555-0202',ContactEmail:'sandra.tremblay@rbc.com',Address:'1 Place Ville-Marie, Montreal QC',Notes:'RBC security coordinator',AddedDate:'2024-01-15'},
+  ];
+}
+function demoKeys(){
+  const d=(n)=>{const x=new Date();x.setDate(x.getDate()-n);return x.toISOString().split('T')[0]};
+  const c=(n)=>{const x=new Date();x.setDate(x.getDate()-n);return x.toISOString().split('T')[0]};
+  return [
+    {Transit:'MTL-001',KeyNumber:'K-2241',Type:'Key',Client:'CIBC',Location:'CIBC Branch – Downtown Montreal',Status:'Issued',HeldBy:'Alex Tremblay',HeldByRole:'Guard',PickupDate:d(12),LastCheckDate:c(16),ReturnedTo:'',Photo:'',Notes:'Main entrance + vault corridor',AddedDate:d(45)},
+    {Transit:'MTL-002',KeyNumber:'F-0892',Type:'Fob',Client:'CIBC',Location:'CIBC Branch – Laval',Status:'Overdue',HeldBy:'Carlos Reyes',HeldByRole:'Guard',PickupDate:d(34),LastCheckDate:c(34),ReturnedTo:'',Photo:'',Notes:'Parking level access',AddedDate:d(60)},
+    {Transit:'MTL-003',KeyNumber:'K-1105',Type:'Key',Client:'RBC',Location:'RBC Branch – Côte-des-Neiges',Status:'With Staff',HeldBy:'Marie Leblanc',HeldByRole:'Manager',PickupDate:d(5),LastCheckDate:c(5),ReturnedTo:'',Photo:'',Notes:'Side door + back stairwell',AddedDate:d(30)},
+    {Transit:'MTL-004',KeyNumber:'F-3341',Type:'Fob',Client:'RBC',Location:'RBC HQ – McGill College',Status:'Issued',HeldBy:'Nadia Osman',HeldByRole:'Guard',PickupDate:d(3),LastCheckDate:c(3),ReturnedTo:'',Photo:'',Notes:'Executive floor elevator',AddedDate:d(30)},
+    {Transit:'MTL-005',KeyNumber:'K-7720',Type:'Key',Client:'CIBC',Location:'CIBC Branch – Westmount',Status:'Flagged',HeldBy:'Tom Wu',HeldByRole:'Guard',PickupDate:d(8),LastCheckDate:c(20),ReturnedTo:'',Photo:'',Notes:'Guard not responding – escalated',AddedDate:d(25)},
+    {Transit:'MTL-006',KeyNumber:'K-4418',Type:'Key',Client:'RBC',Location:'RBC Branch – NDG',Status:'With Staff',HeldBy:'James Tran',HeldByRole:'Supervisor',PickupDate:d(2),LastCheckDate:c(2),ReturnedTo:'',Photo:'',Notes:'Standard branch key set',AddedDate:d(20)},
+    {Transit:'MTL-007',KeyNumber:'F-6653',Type:'Fob',Client:'RBC',Location:'RBC Branch – Pointe-Claire',Status:'Issued',HeldBy:'Priya Singh',HeldByRole:'Mobile',PickupDate:d(15),LastCheckDate:c(15),ReturnedTo:'',Photo:'',Notes:'After-hours mobile patrol',AddedDate:d(15)},
+  ];
+}
+function demoAudit(){
+  const dt=(n,h=10,m=0)=>{const x=new Date();x.setDate(x.getDate()-n);x.setHours(h,m);return x.toISOString()};
+  return [
+    {Timestamp:dt(0,9,14),Action:'Issued',KeyID:'RBC-F-007',Guard:'Priya Singh',Note:'Issued for overnight mobile patrol',Manager:'Marie Leblanc'},
+    {Timestamp:dt(1,14,22),Action:'Issued',KeyID:'RBC-F-004',Guard:'Nadia Osman',Note:'Coverage request – RBC HQ',Manager:'Marie Leblanc'},
+    {Timestamp:dt(4,11,5),Action:'Returned',KeyID:'RBC-K-006',Guard:'Tom Wu',Note:'Returned after weekend patrol',Manager:'James Tran'},
+    {Timestamp:dt(6,16,0),Action:'Issued',KeyID:'CIBC-K-005',Guard:'Tom Wu',Note:'Lockdown coverage – Westmount',Manager:'Marie Leblanc'},
+    {Timestamp:dt(8,9,30),Action:'Flagged',KeyID:'CIBC-K-005',Guard:'Tom Wu',Note:'No response after 48h',Manager:'Marie Leblanc'},
+    {Timestamp:dt(12,13,0),Action:'Check',KeyID:'CIBC-K-001',Guard:'Alex Tremblay',Note:'Bi-weekly check: confirmed same guard, no changes',Manager:'Marie Leblanc'},
+    {Timestamp:dt(34,8,0),Action:'Issued',KeyID:'CIBC-F-002',Guard:'Carlos Reyes',Note:'Laval branch coverage',Manager:'Marie Leblanc'},
+  ];
+}
+
+// ── INIT ──────────────────────────────────────────
+window.onload=()=>{
+  const s=localStorage.getItem('kft_config');
+  if(s){CFG=JSON.parse(s);showApp();loadData();}
+};
+function startApp(){
+  const url=document.getElementById('cfg-url').value.trim();
+  const name=document.getElementById('cfg-name').value.trim();
+  const org=document.getElementById('cfg-org').value.trim();
+  if(!url){toast('Enter the Apps Script URL',true);return}
+  if(!name){toast('Enter your name',true);return}
+  CFG={url,name,org:org||'Xtreme Security',demo:false};
+  localStorage.setItem('kft_config',JSON.stringify(CFG));
+  showApp();loadData();
+}
+function loadDemo(){
+  CFG={url:'',name:'Demo Manager',org:'Xtreme Security Inc.',demo:true};
+  clients=demoClients();keys=demoKeys();audit=demoAudit();guards=demoGuards();
+  showApp();renderAll();syncStatus('demo');
+}
+function showApp(){
+  document.getElementById('setup-screen').style.display='none';
+  document.getElementById('app').style.display='block';
+  document.getElementById('hdr-org').textContent=CFG.org;
+}
+function reconfigure(){localStorage.removeItem('kft_config');location.reload()}
+
+// ── API ───────────────────────────────────────────
+async function apiCall(payload){
+  if(CFG.demo)throw new Error('Demo');
+  const r=await fetch(CFG.url,{method:'POST',body:JSON.stringify(payload)});
+  const j=await r.json();
+  if(j.error)throw new Error(j.error);
+  return j;
+}
+async function loadData(){
+  if(CFG.demo){renderAll();return}
+  syncStatus('syncing');showLoading('Fetching from Google Sheets…');
+  try{
+    const d=await apiCall({action:'getAll'});
+    keys=d.keys||[];audit=d.audit||[];clients=d.clients||[];guards=d.guards||[];
+    renderAll();syncStatus('ok');toast('Refreshed ✓');
+  }catch(e){syncStatus('error');toast('Cannot reach Google Sheet',true);}
+  finally{hideLoading();}
+}
+async function writeRow(sheet,row){if(CFG.demo)return;await apiCall({action:'appendRow',sheet,row})}
+async function updateRow(sheet,idField,idValue,updates){if(CFG.demo)return;await apiCall({action:'updateRow',sheet,idField,idValue,updates})}
+
+// ── RENDER ALL ────────────────────────────────────
+function renderAll(){
+  checkOverdue();
+  updateStats();
+  populateClientFilter();
+  renderTable();
+  renderReminders();
+  renderClients();
+  if(currentTab==='audit')renderAudit();
+}
+
+function checkOverdue(){
+  keys.forEach(k=>{
+    if((k.Status==='Issued'||k.Status==='Overdue')&&k.PickupDate){
+      if(daysOut(k.PickupDate)>=30&&k.Status==='Issued')k.Status='Overdue';
+    }
+  });
+}
+
+function needsCheck(k){
+  if(k.Status==='With Staff'&&!k.HeldBy)return false;
+if(!k.PickupDate&&!k.HeldBy)return false;
+  const refDate=k.LastCheckDate||k.PickupDate;
+  return daysOut(refDate)>=14;
+}
+
+function updateStats(){
+  const total=keys.length;
+  const inOff=keys.filter(k=>k.Status==='In office').length;
+  const issued=keys.filter(k=>k.Status==='Issued'||k.Status==='With Staff').length;
+  const over=keys.filter(k=>k.Status==='Overdue').length;
+  const flag=keys.filter(k=>k.Status==='Flagged').length;
+  const remind=keys.filter(needsCheck).length;
+  document.getElementById('s-total').textContent=total;
+  document.getElementById('s-in').textContent=inOff;
+  document.getElementById('s-issued').textContent=issued;
+  document.getElementById('s-over').textContent=over;
+  document.getElementById('s-flag').textContent=flag;
+  document.getElementById('s-remind').textContent=remind;
+  const badge=document.getElementById('remind-badge');
+  badge.textContent=remind;
+  badge.style.display=remind>0?'inline-block':'none';
+  // Banner
+  const banner=document.getElementById('remind-banner');
+  const bannerList=document.getElementById('remind-banner-list');
+  const dueKeys=keys.filter(needsCheck).slice(0,5);
+  if(dueKeys.length>0){
+    banner.classList.remove('hidden');
+    bannerList.innerHTML='Check due for: '+dueKeys.map(k=>`<span>${k.Transit||k.KeyNumber} (${k.HeldBy||'?'})</span>`).join(' ')+(keys.filter(needsCheck).length>5?` <span>+${keys.filter(needsCheck).length-5} more</span>`:'');
+  } else banner.classList.add('hidden');
+}
+
+function populateClientFilter(){
+  const sel=document.getElementById('f-client');
+  const cur=sel.value;
+  sel.innerHTML='<option value="">All clients</option>'+clients.map(c=>`<option>${c.Name}</option>`).join('');
+  if(cur)sel.value=cur;
+}
+
+function daysOut(dateStr){
+  if(!dateStr)return null;
+  const d=new Date(dateStr);
+  if(isNaN(d))return null;
+  return Math.floor((NOW()-d)/86400000);
+}
+
+function statusBadge(s,checkDue){
+  const map={'With Staff':'b-ok','Issued':'b-out','Overdue':'b-warn','Flagged':'b-danger'};
+  let html=`<span class="badge ${map[s]||'b-ok'}"><span class="dot"></span>${s}</span>`;
+  if(checkDue)html+=' <span class="badge b-remind" style="font-size:10px">⏰ check due</span>';
+  return html;
+}
+
+// ── INVENTORY ─────────────────────────────────────
+function renderTable(){
+  const q=(document.getElementById('q').value||'').toLowerCase();
+  const fs=document.getElementById('f-status').value;
+  const fc=document.getElementById('f-client').value;
+  const ft=document.getElementById('f-type').value;
+  const filtered=keys.filter(k=>{
+    const hay=((k.Transit||'')+(k.KeyNumber||'')+k.Location+(k.HeldBy||'')+k.Client+k.Type).toLowerCase();
+    return(!q||hay.includes(q))&&(!fs||k.Status===fs)&&(!fc||k.Client===fc)&&(!ft||k.Type===ft);
+  });
+  const body=document.getElementById('tbl-body');
+  if(!filtered.length){body.innerHTML='<tr class="empty-row"><td colspan="10">No records match filters</td></tr>';return}
+  body.innerHTML=filtered.map(k=>{
+    const days=daysOut(k.IssuedDate);
+    const checkDue=needsCheck(k);
+    const lastCheckDays=daysOut(k.LastCheckDate||k.IssuedDate);
+    const rc=k.Status==='Flagged'?'flagged-row':k.Status==='Overdue'?'overdue-row':checkDue?'remind-row':'';
+    return`<tr class="${rc}">
+      <td class="mono">${k.ID}</td>
+      <td><span class="tag-type">${k.Type}</span></td>
+      <td style="font-weight:500">${k.Client}</td>
+      <td style="font-size:12px;max-width:180px;line-height:1.4">${k.Location}</td>
+      <td>${statusBadge(k.Status,checkDue)}</td>
+      <td style="font-size:12px">${k.Guard||'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="font-size:12px;color:var(--muted)">${k.IssuedDate||'—'}</td>
+      <td style="font-size:12px${days!==null&&days>=30?';color:var(--warn);font-weight:500':''}">
+        ${days!==null?days+'d':'—'}</td>
+      <td style="font-size:12px${lastCheckDays!==null&&lastCheckDays>=14?';color:var(--purple);font-weight:500':''}">
+        ${k.LastCheckDate?lastCheckDays+'d ago':'—'}</td>
+      <td>
+        <button class="act-btn" onclick="viewKey('${k.ID}')">View</button>
+        ${k.Status!=='In office'?`<button class="act-btn" onclick="openModal('return','${k.ID}')">Return</button>`:''}
+        ${checkDue?`<button class="act-btn" style="color:var(--purple);border-color:#c0a8e8" onclick="openModal('check','${k.ID}')">Check</button>`:''}
+        ${k.Status!=='Flagged'?`<button class="act-btn red" onclick="quickFlag('${k.ID}')">Flag</button>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── REMINDERS ─────────────────────────────────────
+function renderReminders(){
+  const dueKeys=keys.filter(needsCheck).sort((a,b)=>daysOut(b.LastCheckDate||b.IssuedDate)-daysOut(a.LastCheckDate||a.IssuedDate));
+  const container=document.getElementById('reminders-list');
+  if(!dueKeys.length){
+    container.innerHTML='<div class="section-empty">✓ No custody checks due right now.<br>All issued keys/fobs have been verified within the last 14 days.</div>';
+    return;
+  }
+  container.innerHTML=dueKeys.map(k=>{
+    const daysSinceCheck=daysOut(k.LastCheckDate||k.IssuedDate);
+    const isUrgent=daysSinceCheck>=21;
+    const cls=isUrgent?'urgent':'due';
+    const icon=isUrgent?'🔴':'🟡';
+    const prevGuard=getPreviousGuard(k.Transit||k.KeyNumber);
+    const guardChanged=prevGuard&&prevGuard!==k.HeldBy;
+    return`<div class="reminder-card ${cls}">
+      <div class="rc-icon">${icon}</div>
+      <div class="rc-body">
+        <div class="rc-title">${k.ID} — ${k.Location}</div>
+        <div class="rc-meta">
+          Client: <strong>${k.Client}</strong> &nbsp;·&nbsp; Currently with: <strong>${k.HeldBy||'Unknown'}</strong> (${k.HeldByRole||'—'}) &nbsp;·&nbsp; Pickup: ${k.PickupDate||'—'}<br>
+          Last custody check: ${k.LastCheckDate||'Never recorded'} <strong style="color:${isUrgent?'var(--accent)':'var(--warn)'}">— ${daysSinceCheck}d ago</strong>
+          ${guardChanged?`<br>⚠️ Previous holder was <strong>${prevGuard}</strong> — confirm current custody`:''}
+        </div>
+        <div class="rc-actions">
+          <button class="btn-action green" onclick="openModal('check','${k.Transit||k.KeyNumber||k.ID}')">✓ Record custody check</button>
+          <button class="btn-action" onclick="openModal('return','${k.Transit||k.KeyNumber||k.ID}')">Log return</button>
+          <button class="btn-action red" onclick="quickFlag('${k.Transit||k.KeyNumber||k.ID}')">Flag missing</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function getPreviousGuard(keyId){
+  const events=audit.filter(e=>e.KeyID===keyId&&(e.Action==='Issued'||e.Action==='Check')).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp));
+  if(events.length<2)return null;
+  return events[1].Guard||events[1].HeldBy||null;
+}
+
+// ── CLIENTS ───────────────────────────────────────
+function renderClients(){
+  const q=(document.getElementById('client-q')?document.getElementById('client-q').value.toLowerCase():'');
+  const filtered=clients.filter(c=>(c.Name+c.ContactName+c.Address).toLowerCase().includes(q));
+  const grid=document.getElementById('clients-grid');
+  if(!filtered.length){grid.innerHTML='<div class="section-empty">No clients yet. Click "+ Add Client" to add one.</div>';return}
+  grid.innerHTML=filtered.map(c=>{
+    const cKeys=keys.filter(k=>k.Client===c.Name);
+    const issued=cKeys.filter(k=>k.Status==='Issued'||k.Status==='Overdue').length;
+    const flagged=cKeys.filter(k=>k.Status==='Flagged').length;
+    return`<div class="client-card">
+      <div class="client-card-top">
+        <div class="client-name">${c.Name}</div>
+        <button class="act-btn" onclick="editClient('${c.Name}')">Edit</button>
+      </div>
+      <div class="client-meta">
+        ${c.ContactName?`<div>👤 ${c.ContactName}</div>`:''}
+        ${c.ContactPhone?`<div>📞 ${c.ContactPhone}</div>`:''}
+        ${c.ContactEmail?`<div>✉️ ${c.ContactEmail}</div>`:''}
+        ${c.Address?`<div>📍 ${c.Address}</div>`:''}
+        ${c.Notes?`<div style="color:var(--muted);margin-top:4px">${c.Notes}</div>`:''}
+      </div>
+      <div class="client-stats">
+        <span class="cs-pill">${cKeys.length} keys/fobs</span>
+        ${issued?`<span class="cs-pill" style="color:var(--blue)">${issued} issued</span>`:''}
+        ${flagged?`<span class="cs-pill" style="color:var(--danger)">${flagged} flagged</span>`:''}
+      </div>
+      <div class="client-actions">
+        <button class="btn-outline" style="font-size:11px" onclick="filterByClient('${c.Name}')">View keys</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterByClient(name){
+  switchTab('inventory',document.querySelector('.tab-btn'));
+  document.getElementById('f-client').value=name;
+  renderTable();
+}
+
+// ── AUDIT ─────────────────────────────────────────
+function renderAudit(){
+  const q=(document.getElementById('audit-q').value||'').toLowerCase();
+  const fa=document.getElementById('audit-action').value;
+  const filtered=audit.filter(e=>{
+    const hay=((e.KeyID||'')+' '+(e.Guard||'')+' '+(e.Note||'')+' '+(e.Action||'')+' '+(e.Manager||'')).toLowerCase();
+    return(!q||hay.includes(q))&&(!fa||e.Action===fa);
+  }).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp));
+  document.getElementById('audit-count').textContent=filtered.length+' events';
+  const iconMap={
+    'Issued':['ai-issued','<svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'],
+    'Returned':['ai-returned','<svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>'],
+    'Flagged':['ai-flagged','<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/></svg>'],
+    'Added':['ai-added','<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>'],
+    'Check':['ai-remind','<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'],
+    'Unflagged':['ai-returned','<svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'],
+  };
+  const list=document.getElementById('audit-list');
+  if(!filtered.length){list.innerHTML='<div class="section-empty">No events</div>';return}
+  list.innerHTML=filtered.map(e=>{
+    const[cls,icon]=iconMap[e.Action]||['ai-added','<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>'];
+    const dt=e.Timestamp?new Date(e.Timestamp):null;
+    const ts=dt?dt.toLocaleString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+    return`<div class="audit-item">
+      <div class="audit-icon ${cls}">${icon}</div>
+      <div class="audit-body">
+        <strong>${e.Action}</strong> — <span class="mono" style="font-size:12px">${e.KeyID||''}</span>${e.Guard?' · '+e.Guard:''}
+        ${e.Note?`<div class="audit-meta">${e.Note}</div>`:''}
+        ${e.Manager?`<div class="audit-meta">By: ${e.Manager}</div>`:''}
+      </div>
+      <div class="audit-time">${ts}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── MODALS ────────────────────────────────────────
+function openModal(type,id){
+  const m=document.getElementById('modal-body');
+  const clientOpts=clients.map(c=>`<option>${c.Name}</option>`).join('')+(clients.length?'':`<option>CIBC</option><option>RBC</option>`);
+  const guardOpts=getGuards().map(g=>`<option>${g}</option>`).join('');
+  const availableKeys=keys.filter(k=>k.Status==='With Staff'&&k.HeldByRole&&['Manager','Supervisor'].includes(k.HeldByRole));
+  const issuedKeys=keys.filter(k=>k.HeldBy);
+
+  if(type==='addGuard'){
+    m.innerHTML=`<h3>Add guard / officer</h3>
+    <div class="mf">
+      <div class="fg"><label>Full name</label><input id="mf-gname" placeholder="e.g. Alex Tremblay"></div>
+      <div class="fg"><label>Phone number</label><input id="mf-gphone" type="tel" placeholder="514-555-0000"></div>
+      <div class="fg"><label>Email address</label><input id="mf-gemail" type="email" placeholder="guard@xtremesg.com"></div>
+      <div class="fg"><label>Role</label><select id="mf-grole"><option>Guard</option><option>Mobile</option><option>Supervisor</option><option>Manager</option></select></div>
+      <div class="fg"><label>Notes</label><textarea id="mf-gnotes" placeholder="Coverage areas, shifts, special instructions…"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-action" onclick="doAddGuard()">Add guard</button>
+    </div>`;
+  }
+  else if(type==='editGuard'){
+    const g=guards.find(x=>x.Name===id);
+    if(!g)return;
+    m.innerHTML=`<h3>Edit guard — ${g.Name}</h3>
+    <div class="mf">
+      <div class="fg"><label>Full name</label><input value="${g.Name}" readonly style="background:var(--off);color:var(--muted)"></div>
+      <div class="fg"><label>Phone number</label><input id="mf-gphone" type="tel" value="${g.Phone||''}"></div>
+      <div class="fg"><label>Email address</label><input id="mf-gemail" type="email" value="${g.Email||''}"></div>
+      <div class="fg"><label>Role</label><select id="mf-grole">
+        ${['Guard','Mobile','Supervisor','Manager'].map(r=>`<option${r===g.Role?' selected':''}>${r}</option>`).join('')}
+      </select></div>
+      <div class="fg"><label>Notes</label><textarea id="mf-gnotes">${g.Notes||''}</textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-action" onclick="doEditGuard('${g.Name.replace(/'/g,"\\'")}')">Save changes</button>
+    </div>`;
+  }
+  else if(type==='addClient'){
+    m.innerHTML=`<h3>Add client</h3>
+    <div class="mf">
+      <div class="fg"><label>Client / company name</label><input id="mf-cname" placeholder="e.g. CIBC, RBC, TD Bank…"></div>
+      <div class="fg"><label>Security contact name</label><input id="mf-ccont" placeholder="e.g. Pierre Gagnon"></div>
+      <div class="fg"><label>Contact phone</label><input id="mf-cphone" placeholder="514-555-0000" type="tel"></div>
+      <div class="fg"><label>Contact email</label><input id="mf-cemail" placeholder="security@client.com" type="email"></div>
+      <div class="fg"><label>Address</label><input id="mf-caddr" placeholder="Branch / head office address"></div>
+      <div class="fg"><label>Notes</label><textarea id="mf-cnotes" placeholder="Special instructions, contract info…"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-action" onclick="doAddClient()">Add client</button>
+    </div>`;
+  }
+  else if(type==='editClient'){
+    const c=clients.find(x=>x.Name===id);
+    if(!c)return;
+    m.innerHTML=`<h3>Edit client — ${c.Name}</h3>
+    <div class="mf">
+      <div class="fg"><label>Client name</label><input id="mf-cname" value="${c.Name}" readonly style="background:var(--off);color:var(--muted)"></div>
+      <div class="fg"><label>Security contact name</label><input id="mf-ccont" value="${c.ContactName||''}" placeholder="Contact name"></div>
+      <div class="fg"><label>Contact phone</label><input id="mf-cphone" value="${c.ContactPhone||''}" type="tel"></div>
+      <div class="fg"><label>Contact email</label><input id="mf-cemail" value="${c.ContactEmail||''}" type="email"></div>
+      <div class="fg"><label>Address</label><input id="mf-caddr" value="${c.Address||''}" ></div>
+      <div class="fg"><label>Notes</label><textarea id="mf-cnotes">${c.Notes||''}</textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-action" onclick="doEditClient('${c.Name}')">Save changes</button>
+    </div>`;
+  }
+  else if(type==='addKey'){
+    m.innerHTML=`<h3>Add key / fob to inventory</h3>
+    <div class="mf">
+      <div class="fg"><label>ID</label><input id="mf-id" placeholder="e.g. CIBC-K-008"></div>
+      <div class="fg"><label>Type</label><select id="mf-type"><option>Key</option><option>Fob</option></select></div>
+      <div class="fg"><label>Client</label><select id="mf-client">${clientOpts}</select></div>
+      <div class="fg"><label>Branch / location</label><input id="mf-loc" placeholder="e.g. CIBC Branch – Laval"></div>
+      <div class="fg"><label>How received</label>
+        <select id="mf-recv"><option>Sent to us by bank</option><option>Guard picked up from bank</option><option>Sent to pickup address</option></select></div>
+      <div class="fg"><label>Notes</label><textarea id="mf-notes" placeholder="Access areas, conditions…"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-action" onclick="doAddKey()">Add to inventory</button>
+    </div>`;
+  }
+  else if(type==='issue'){
+    const availOpts=availableKeys.map(k=>`<option value="${k.Transit||k.KeyNumber}">${k.Transit} / ${k.KeyNumber} — ${k.Client} — ${k.Location}</option>`).join('')||'<option>None available</option>';
+    m.innerHTML=`<h3>Issue key / fob to guard</h3>
+    <div class="mf">
+      <div class="fg"><label>Key / Fob (Transit / Number)</label>
+        <select id="mf-key">${availOpts}</select></div>
+      <div class="fg"><label>Issued to (guard / recipient)</label>
+        <input id="mf-guard" list="gl" placeholder="Type name or select…" oninput="showGuardContact(this.value,'guard-contact-box')">
+        <datalist id="gl">${getGuards().map(g=>`<option>${g}</option>`).join('')}</datalist>
+        <div id="guard-contact-box"></div>
+      </div>
+      <div class="fg"><label>Recipient role</label>
+        <select id="mf-role"><option>Guard</option><option>Mobile</option><option>Supervisor</option><option>Manager</option><option>Other</option></select></div>
+      <div class="fg"><label>Pickup date</label>
+        <input type="date" id="mf-pickupdate" value="${new Date().toISOString().split('T')[0]}"></div>
+      <div class="fg"><label>Pickup method</label>
+        <select id="mf-pickup"><option>Picked up from office</option><option>Picked up from bank</option><option>Delivered on-site</option><option>Sent to address</option></select></div>
+      <div class="fg"><label>Purpose / post</label><textarea id="mf-notes" placeholder="Reason, shift, post location…"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-action" onclick="doIssue()">Confirm issuance</button>
+    </div>`;
+  }
+  else if(type==='return'){
+    const retOpts=issuedKeys.map(k=>`<option value="${k.Transit||k.KeyNumber}">${k.Transit}/${k.KeyNumber} — ${k.HeldBy||'?'} — ${k.Location}</option>`).join('')||'<option>None currently out</option>';
+    m.innerHTML=`<h3>Log key / fob return</h3>
+    <div class="mf">
+      <div class="fg"><label>Key / Fob being returned</label>
+        <select id="mf-key" onchange="prefillReturnedBy(this.value)">${retOpts}</select></div>
+      <div class="fg"><label>Returned by (who is handing it back)</label>
+        <input id="mf-guard" list="gl2" placeholder="Name of person returning it" oninput="showGuardContact(this.value,'ret-contact-box')">
+        <datalist id="gl2">${guardOpts}</datalist>
+        <div id="ret-contact-box"></div>
+      </div>
+      <div class="fg"><label>Returned TO (who receives it)</label>
+        <input id="mf-returnedto" list="gl3" placeholder="Manager / supervisor name receiving it">
+        <datalist id="gl3">${getGuards().map(g=>`<option>${g}</option>`).join('')}</datalist>
+      </div>
+      <div class="fg"><label>Return date</label>
+        <input type="date" id="mf-returndate" value="${new Date().toISOString().split('T')[0]}"></div>
+      <div class="fg"><label>Condition</label>
+        <select id="mf-cond"><option>Good – no issues</option><option>Minor wear</option><option>Damaged – incident report needed</option><option>Lost – report filed</option></select></div>
+      <div class="fg"><label>Notes</label><textarea id="mf-notes" placeholder="Any observations on the return…"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-action" onclick="doReturn()">Confirm return</button>
+    </div>
+    <script>
+    setTimeout(()=>{
+      const sel=document.getElementById('mf-key');
+      if(sel&&'${id||''}'){for(let i=0;i<sel.options.length;i++)if(sel.options[i].value==='${id||''}'){sel.selectedIndex=i;break}}
+      prefillReturnedBy(sel?sel.value:'');
+    },50);
+    function prefillReturnedBy(transit){
+      const k=keys.find(x=>(x.Transit===transit||x.KeyNumber===transit));
+      if(k&&k.HeldBy){const el=document.getElementById('mf-guard');if(el&&!el.value)el.value=k.HeldBy;showGuardContact(k.HeldBy,'ret-contact-box');}
+    }
+    <\/script>`;
+  }
+  else if(type==='check'){
+    const k=keys.find(x=>x.ID===id);
+    if(!k)return;
+    const daysSince=daysOut(k.LastCheckDate||k.IssuedDate);
+    m.innerHTML=`<h3>Bi-weekly custody check — ${id}</h3>
+    <div class="info-box">
+      Last check: <strong>${k.LastCheckDate||'Never'}</strong> (${daysSince} days ago)<br>
+      Currently recorded with: <strong>${k.HeldBy||'Unknown'}</strong> (${k.HeldByRole||'—'})<br>
+      Use this form to confirm the guard still holds the key, OR to record that it was handed to someone else.
+    </div>
+    <div class="mf">
+      <div class="fg"><label>Custody outcome</label>
+        <select id="mf-custody" onchange="toggleHandoff(this.value)">
+          <option value="same">Same person — confirmed, no change</option>
+          <option value="handoff">Key handed off to a different person</option>
+        </select>
+      </div>
+      <div id="handoff-fields" style="display:none">
+        <div class="fg"><label>New holder name</label><input id="mf-newguard" list="gl3" placeholder="Name of new holder"><datalist id="gl3">${guardOpts}</datalist></div>
+        <div class="fg"><label>Reason for handoff</label><input id="mf-handoff-reason" placeholder="e.g. Shift change, reassignment…"></div>
+      </div>
+      <div class="fg"><label>Verified by (your name)</label><input id="mf-checker" value="${CFG.name}" placeholder="Manager name"></div>
+      <div class="fg"><label>Check notes (optional)</label><textarea id="mf-notes" placeholder="Any observations, condition, contact method…"></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn-action green" onclick="doCheck('${id}')">Record check</button>
+    </div>`;
+  }
+  else if(type==='view'){
+    const k=keys.find(x=>x.ID===id);
+    if(!k)return;
+    const days=daysOut(k.PickupDate);
+    const checkDays=daysOut(k.LastCheckDate||k.PickupDate);
+    const tid=k.Transit||k.KeyNumber;
+    const recentAudit=audit.filter(e=>e.KeyID===tid).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp)).slice(0,3);
+    m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
+    ${k.Photo?`<img src="${k.Photo}" style="width:100%;max-height:160px;object-fit:cover;border-radius:var(--r2);margin-bottom:1rem;border:1px solid var(--border)">`:''} 
+    <div class="modal-detail">
+      <table>
+        <tr><td>Transit #</td><td class="mono" style="font-weight:500">${k.Transit||'—'}</td></tr>
+        <tr><td>Key / Fob #</td><td class="mono">${k.KeyNumber||'—'}</td></tr>
+        <tr><td>Type</td><td>${k.Type}</td></tr>
+        <tr><td>Client</td><td style="font-weight:500">${k.Client}</td></tr>
+        <tr><td>Location</td><td style="font-size:12px">${k.Location}</td></tr>
+        <tr><td>Status</td><td>${statusBadge(k.Status,needsCheck(k))}</td></tr>
+        <tr><td>Held by</td><td>${k.HeldBy?`<strong>${k.HeldBy}</strong> <span style="color:var(--muted);font-size:12px">(${k.HeldByRole||'—'})</span>${guardContactHtml(k.HeldBy)}`:'<span style="color:var(--muted)">Not assigned</span>'}</td></tr>
+        <tr><td>Pickup date</td><td>${k.PickupDate||'—'}</td></tr>
+        <tr><td>Days out</td><td>${days!==null?`<strong${days>=30?' style="color:var(--warn)"':''}>` +days+' days</strong>':'—'}</td></tr>
+        <tr><td>Last check</td><td style="${checkDays>=14?'color:var(--purple);font-weight:500':''}">
+          ${k.LastCheckDate||'Never'}${k.PickupDate&&checkDays!==null?' ('+checkDays+'d ago)':''}</td></tr>
+        <tr><td>Last returned to</td><td style="font-size:12px">${k.ReturnedTo||'—'}</td></tr>
+        <tr><td>Notes</td><td style="font-size:12px;line-height:1.5">${k.Notes||'—'}</td></tr>
+        <tr><td>Added</td><td style="font-size:12px;color:var(--muted)">${k.AddedDate||'—'}</td></tr>
+      </table>
+    </div>
+    ${recentAudit.length?`<div style="margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem">
+      <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:8px">Recent activity</div>
+      ${recentAudit.map(e=>{
+        const dt=new Date(e.Timestamp);
+        const ts=dt.toLocaleString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+        return`<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">
+          <span><strong>${e.Action}</strong>${e.Guard?' · '+e.Guard:''}</span>
+          <span style="color:var(--muted);font-family:var(--mono);font-size:11px">${ts} · ${e.Manager||'—'}</span>
+        </div>`;
+      }).join('')}
+    </div>`:''}
+    <div class="detail-actions">
+      ${k.HeldBy?`<button class="btn-action" onclick="closeModal();openModal('return','${tid}')">Log Return</button>`:''}
+      ${needsCheck(k)?`<button class="btn-action green" onclick="closeModal();openModal('check','${tid}')">Record Check</button>`:''}
+      ${k.Status!=='Flagged'?`<button class="btn-action red" onclick="doFlag('${tid}')">🚩 Flag missing</button>`:`<button class="btn-action" onclick="doUnflag('${tid}')">Unflag</button>`}
+      ${!k.HeldBy?`<button class="btn-action" onclick="closeModal();openModal('issue')">Issue</button>`:''}
+      <button class="btn-outline" onclick="closeModal()">Close</button>
+    </div>`;
+  }
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function toggleHandoff(v){
+  document.getElementById('handoff-fields').style.display=v==='handoff'?'':' none';
+}
+function closeModal(){document.getElementById('modal-overlay').classList.remove('open')}
+
+// ── ACTIONS ───────────────────────────────────────
+async function doAddClient(){
+  const name=v('mf-cname');
+  if(!name){toast('Client name required',true);return}
+  if(clients.find(c=>c.Name===name)){toast('Client already exists',true);return}
+  const today=new Date().toISOString().split('T')[0];
+  const row={Name:name,ContactName:v('mf-ccont'),ContactPhone:v('mf-cphone'),ContactEmail:v('mf-cemail'),Address:v('mf-caddr'),Notes:v('mf-cnotes'),AddedDate:today};
+  clients.push(row);closeModal();renderAll();
+  if(!CFG.demo){showLoading('Saving…');try{await writeRow('Clients',row);toast('Client added ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  else toast('Client added ✓');
+}
+async function doEditClient(name){
+  const c=clients.find(x=>x.Name===name);if(!c)return;
+  c.ContactName=v('mf-ccont');c.ContactPhone=v('mf-cphone');c.ContactEmail=v('mf-cemail');c.Address=v('mf-caddr');c.Notes=v('mf-cnotes');
+  closeModal();renderAll();
+  if(!CFG.demo){showLoading('Saving…');try{await updateRow('Clients','Name',name,{ContactName:c.ContactName,ContactPhone:c.ContactPhone,ContactEmail:c.ContactEmail,Address:c.Address,Notes:c.Notes});toast('Client updated ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  else toast('Client updated ✓');
+}
+function editClient(name){openModal('editClient',name)}
+
+async function doAddKey(){
+  const transit=v('mf-transit'),keynum=v('mf-keynum'),type=v('mf-type'),client=v('mf-client'),loc=v('mf-loc'),notes=v('mf-notes'),recv=v('mf-recv');
+  if(!transit||!loc){toast('Transit # and location required',true);return}
+  if(keys.find(k=>k.Transit===transit)){toast('Transit # already exists',true);return}
+  const today=new Date().toISOString().split('T')[0];
+  // Handle photo
+  let photoData='';
+  const photoFile=document.getElementById('mf-photo');
+  if(photoFile&&photoFile.files[0]){
+    photoData=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(photoFile.files[0]);});
+  }
+  const row={Transit:transit,KeyNumber:keynum,Type:type,Client:client,Location:loc,Status:'With Staff',HeldBy:CFG.name,HeldByRole:'Manager',PickupDate:today,LastCheckDate:today,ReturnedTo:'',Photo:photoData,Notes:notes,AddedDate:today};
+  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:transit,Guard:CFG.name,Note:`Received via: ${recv}. Key#: ${keynum}. ${notes}`,Manager:CFG.name};
+  keys.push(row);audit.unshift(logRow);closeModal();renderAll();
+  if(!CFG.demo){showLoading('Saving…');try{await writeRow('Keys',row);await writeRow('AuditLog',logRow);toast('Added ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  else toast('Added ✓');
+}
+async function doIssue(){
+  const transit=v('mf-key'),guard=v('mf-guard'),role=v('mf-role'),note=v('mf-notes'),pickup=v('mf-pickup'),pickupDate=v('mf-pickupdate')||new Date().toISOString().split('T')[0];
+  if(!transit||!guard){toast('Key/Fob and recipient name required',true);return}
+  const k=keys.find(x=>x.Transit===transit||x.KeyNumber===transit);if(!k)return;
+  k.Status='Issued';k.HeldBy=guard;k.HeldByRole=role;k.PickupDate=pickupDate;k.LastCheckDate=pickupDate;
+  const logRow={Timestamp:new Date().toISOString(),Action:'Issued',KeyID:k.Transit,Guard:guard,Note:`${pickup}. Role: ${role}. Pickup: ${pickupDate}. ${note}`,Manager:CFG.name};
+  audit.unshift(logRow);closeModal();renderAll();
+  if(!CFG.demo){showLoading('Saving…');try{await updateRow('Keys','Transit',k.Transit,{Status:'Issued',HeldBy:guard,HeldByRole:role,PickupDate:pickupDate,LastCheckDate:pickupDate});await writeRow('AuditLog',logRow);toast('Issued ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  else toast('Issued ✓');
+}
+async function doReturn(){
+  const transit=v('mf-key'),returnedBy=v('mf-guard'),returnedTo=v('mf-returnedto'),note=v('mf-notes'),cond=v('mf-cond'),returnDate=v('mf-returndate')||new Date().toISOString().split('T')[0];
+  if(!transit){toast('Select a key/fob',true);return}
+  if(!returnedTo){toast('Enter who is receiving the key',true);return}
+  const k=keys.find(x=>x.Transit===transit||x.KeyNumber===transit);if(!k)return;
+  const prevHolder=k.HeldBy;
+  k.Status='With Staff';k.HeldBy=returnedTo;k.HeldByRole='Manager';k.ReturnedTo=returnedTo;k.PickupDate=returnDate;k.LastCheckDate=returnDate;
+  const logRow={Timestamp:new Date().toISOString(),Action:'Returned',KeyID:k.Transit,Guard:returnedBy,Note:`Returned by: ${returnedBy} → to: ${returnedTo}. Date: ${returnDate}. Condition: ${cond}. ${note}`,Manager:CFG.name};
+  audit.unshift(logRow);closeModal();renderAll();
+  if(!CFG.demo){showLoading('Saving…');try{await updateRow('Keys','Transit',k.Transit,{Status:'With Staff',HeldBy:returnedTo,HeldByRole:'Manager',ReturnedTo:returnedTo,PickupDate:returnDate,LastCheckDate:returnDate});await writeRow('AuditLog',logRow);toast('Return logged ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  else toast('Return logged ✓');
+}
+async function doCheck(keyId){
+  const k=keys.find(x=>x.Transit===keyId||x.KeyNumber===keyId);if(!k)return;
+  const custody=v('mf-custody');
+  const checker=v('mf-checker')||CFG.name;
+  const notes=v('mf-notes');
+  const today=new Date().toISOString().split('T')[0];
+  let noteText='';
+  if(custody==='handoff'){
+    const newGuard=v('mf-newguard');
+    const reason=v('mf-handoff-reason');
+    if(!newGuard){toast('Enter new guard name',true);return}
+    const oldGuard=k.HeldBy;
+    k.HeldBy=newGuard;
+    noteText=`Handoff: ${oldGuard} → ${newGuard}. Reason: ${reason}. ${notes}`;
+    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit||keyId,Guard:newGuard,Note:noteText,Manager:checker};
+    audit.unshift(logRow);
+    if(!CFG.demo)await updateRow('Keys','ID',keyId,{Guard:newGuard,LastCheckDate:today}).catch(()=>{});
+    if(!CFG.demo)await writeRow('AuditLog',logRow).catch(()=>{});
+  } else {
+    noteText=`Confirmed: same holder (${k.HeldBy}). ${notes}`;
+    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit||keyId,Guard:k.HeldBy,Note:noteText,Manager:checker};
+    audit.unshift(logRow);
+    if(!CFG.demo)await updateRow('Keys','ID',keyId,{LastCheckDate:today}).catch(()=>{});
+    if(!CFG.demo)await writeRow('AuditLog',logRow).catch(()=>{});
+  }
+  k.LastCheckDate=today;
+  closeModal();renderAll();toast('Custody check recorded ✓');
+}
+async function doFlag(id){
+  const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);if(!k)return;
+  k.Status='Flagged';
+  const logRow={Timestamp:new Date().toISOString(),Action:'Flagged',KeyID:k.Transit||id,Guard:k.HeldBy,Note:'🚩 Flagged as missing / unresponsive guard',Manager:CFG.name};
+  audit.unshift(logRow);closeModal();renderAll();
+  if(!CFG.demo){try{await updateRow('Keys','ID',id,{Status:'Flagged'});await writeRow('AuditLog',logRow);}catch(e){}}
+  else toast('Flagged ✓');
+}
+async function doUnflag(id){
+  const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);if(!k)return;
+  k.Status='Issued';
+  const logRow={Timestamp:new Date().toISOString(),Action:'Unflagged',KeyID:k.Transit||id,Guard:k.HeldBy,Note:'Flag resolved – accounted for',Manager:CFG.name};
+  audit.unshift(logRow);closeModal();renderAll();
+  if(!CFG.demo){try{await updateRow('Keys','ID',id,{Status:'Issued'});await writeRow('AuditLog',logRow);}catch(e){}}
+  toast('Unflagged ✓');
+}
+
+function quickFlag(id){doFlag(id)}
+function viewKey(id){
+  const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);
+  if(k)openModal('view',k.Transit||k.KeyNumber);
+}
+
+// ── UTILS ─────────────────────────────────────────
+function showGuardContact(name, boxId){
+  const box=document.getElementById(boxId);
+  if(!box)return;
+  box.innerHTML=guardContactHtml(name);
+}
+function v(id){const el=document.getElementById(id);return el?el.value.trim():''}
+function getGuards(){
+  // Merge registered guards + any names from audit/keys not yet registered
+  const fromRegistry=guards.map(g=>g.Name);
+  const fromHistory=new Set();
+  audit.forEach(e=>{if(e.Guard)fromHistory.add(e.Guard)});
+  keys.forEach(k=>{if(k.Guard)fromHistory.add(k.Guard)});
+  fromHistory.forEach(n=>{if(!fromRegistry.includes(n))fromRegistry.push(n)});
+  return fromRegistry.sort();
+}
+function getGuardInfo(name){
+  return guards.find(g=>g.Name===name)||null;
+}
+function guardContactHtml(name){
+  const g=getGuardInfo(name);
+  if(!g)return'';
+  return`<div style="margin-top:6px;padding:8px 10px;background:var(--blue-bg);border-radius:var(--r);font-size:12px;line-height:1.8">
+    ${g.Phone?`<a href="tel:${g.Phone}" style="color:var(--blue);text-decoration:none;display:block">📞 ${g.Phone}</a>`:''}
+    ${g.Email?`<a href="mailto:${g.Email}" style="color:var(--blue);text-decoration:none;display:block">✉️ ${g.Email}</a>`:''}
+    ${g.Role?`<span style="color:var(--muted)">Role: ${g.Role}</span>`:''}
+  </div>`;
+}
+
+function renderGuards(){
+  const q=(document.getElementById('guard-q')?document.getElementById('guard-q').value.toLowerCase():'');
+  const filtered=guards.filter(g=>(g.Name+g.Phone+g.Email+g.Role).toLowerCase().includes(q));
+  const grid=document.getElementById('guards-grid');
+  if(!filtered.length){grid.innerHTML='<div class="section-empty">No guards yet. Click "+ Add Guard" to add one.</div>';return}
+  grid.innerHTML=filtered.map(g=>{
+    const heldKeys=keys.filter(k=>k.HeldBy===g.Name);
+    const flagged=heldKeys.filter(k=>k.Status==='Flagged').length;
+    const overdue=heldKeys.filter(k=>k.Status==='Overdue').length;
+    return`<div class="client-card">
+      <div class="client-card-top">
+        <div>
+          <div class="client-name">${g.Name}</div>
+          <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">${g.Role||'Guard'}</div>
+        </div>
+        <button class="act-btn" onclick="openModal('editGuard','${g.Name.replace(/'/g,"\\'")}')">Edit</button>
+      </div>
+      <div class="client-meta">
+        ${g.Phone?`<div><a href="tel:${g.Phone}" style="color:var(--accent2);text-decoration:none">📞 ${g.Phone}</a></div>`:'<div style="color:var(--muted)">No phone on file</div>'}
+        ${g.Email?`<div><a href="mailto:${g.Email}" style="color:var(--accent2);text-decoration:none">✉️ ${g.Email}</a></div>`:'<div style="color:var(--muted)">No email on file</div>'}
+        ${g.Notes?`<div style="color:var(--muted);margin-top:4px">${g.Notes}</div>`:''}
+      </div>
+      <div class="client-stats">
+        <span class="cs-pill">${heldKeys.length} key${heldKeys.length!==1?'s':''} held</span>
+        ${overdue?`<span class="cs-pill" style="color:var(--warn)">${overdue} overdue</span>`:''}
+        ${flagged?`<span class="cs-pill" style="color:var(--danger)">${flagged} flagged</span>`:''}
+      </div>
+      ${heldKeys.length?`<div class="client-actions"><button class="btn-outline" style="font-size:11px" onclick="filterByGuard('${g.Name.replace(/'/g,"\\'")}')">View held keys</button></div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function filterByGuard(name){
+  switchTab('inventory',document.querySelector('.tab-btn'));
+  document.getElementById('q').value=name;
+  renderTable();
+}
+
+async function doAddGuard(){
+  const name=v('mf-gname');
+  if(!name){toast('Name required',true);return}
+  if(guards.find(g=>g.Name===name)){toast('Guard already exists',true);return}
+  const today=new Date().toISOString().split('T')[0];
+  const row={Name:name,Phone:v('mf-gphone'),Email:v('mf-gemail'),Role:v('mf-grole'),Notes:v('mf-gnotes'),AddedDate:today};
+  guards.push(row);closeModal();renderAll();renderGuards();
+  if(!CFG.demo){showLoading('Saving…');try{await writeRow('Guards',row);toast('Guard added ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  else toast('Guard added ✓');
+}
+async function doEditGuard(name){
+  const g=guards.find(x=>x.Name===name);if(!g)return;
+  g.Phone=v('mf-gphone');g.Email=v('mf-gemail');g.Role=v('mf-grole');g.Notes=v('mf-gnotes');
+  closeModal();renderAll();renderGuards();
+  if(!CFG.demo){showLoading('Saving…');try{await updateRow('Guards','Name',name,{Phone:g.Phone,Email:g.Email,Role:g.Role,Notes:g.Notes});toast('Guard updated ✓');}catch(e){toast('Saved locally – sync failed',true);}finally{hideLoading();}}
+  else toast('Guard updated ✓');
+}
+function editGuard(name){openModal('editGuard',name)}
+function switchTab(tab,btn){
+  ['inventory','reminders','guards','clients','audit'].forEach(t=>document.getElementById('tab-'+t).style.display=t===tab?'':' none');
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  currentTab=tab;
+  if(tab==='audit')renderAudit();
+  if(tab==='reminders')renderReminders();
+  if(tab==='guards')renderGuards();
+}
+function syncStatus(state){
+  const dot=document.getElementById('sync-dot');
+  const lbl=document.getElementById('sync-label');
+  dot.className='sync-dot'+(state==='syncing'?' syncing':state==='error'?' error':'');
+  lbl.textContent=state==='syncing'?'Syncing…':state==='error'?'Error':state==='demo'?'Demo':'Live';
+}
+function showLoading(txt){document.getElementById('loading').classList.remove('hide');document.getElementById('loading-txt').textContent=txt||'Loading…'}
+function hideLoading(){document.getElementById('loading').classList.add('hide')}
+let _tt;
+function toast(msg,err=false){
+  const el=document.getElementById('toast');el.textContent=msg;
+  el.className='show'+(err?' err':'');clearTimeout(_tt);
+  _tt=setTimeout(()=>{el.className=''},3500);
+}
+function exportCSV(){
+  const hdr=['Transit','KeyNumber','Type','Client','Location','Status','HeldBy','HeldByRole','PickupDate','DaysOut','LastCheckDate','ReturnedTo','Notes'];
+  const rows=keys.map(k=>[k.Transit||'',k.KeyNumber||'',k.Type,k.Client,k.Location,k.Status,k.HeldBy||'',k.HeldByRole||'',k.PickupDate||'',daysOut(k.PickupDate)??'',k.LastCheckDate||'',k.ReturnedTo||'',k.Notes||'']);
+  const csv=[hdr,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'\\"')}"`).join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='key-fob-'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+}
+</script>
+</body>
+</html>
