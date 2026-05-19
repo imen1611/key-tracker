@@ -539,29 +539,32 @@ function renderTable(){
     return(!q||hay.includes(q))&&(!fs||k.Status===fs)&&(!fc||k.Client===fc)&&(!ft||k.Type===ft);
   });
   const body=document.getElementById('tbl-body');
-  if(!filtered.length){body.innerHTML='<tr class="empty-row"><td colspan="10">No records match filters</td></tr>';return}
+  if(!filtered.length){body.innerHTML='<tr class="empty-row"><td colspan="12">No records match filters</td></tr>';return}
   body.innerHTML=filtered.map(k=>{
-    const days=daysOut(k.IssuedDate);
+    const days=daysOut(k.PickupDate);
     const checkDue=needsCheck(k);
-    const lastCheckDays=daysOut(k.LastCheckDate||k.IssuedDate);
+    const lastCheckDays=daysOut(k.LastCheckDate||k.PickupDate);
     const rc=k.Status==='Flagged'?'flagged-row':k.Status==='Overdue'?'overdue-row':checkDue?'remind-row':'';
+    const tid=k.Transit||k.KeyNumber||'';
     return`<tr class="${rc}">
-      <td class="mono">${k.ID}</td>
+      <td class="mono" style="font-weight:500">${k.Transit||'—'}</td>
+      <td class="mono">${k.KeyNumber||'—'}</td>
       <td><span class="tag-type">${k.Type}</span></td>
-      <td style="font-weight:500">${k.Client}</td>
-      <td style="font-size:12px;max-width:180px;line-height:1.4">${k.Location}</td>
+      <td style="font-weight:500;font-size:12px">${k.Client}</td>
+      <td style="font-size:12px;max-width:160px;line-height:1.4">${k.Location}</td>
       <td>${statusBadge(k.Status,checkDue)}</td>
-      <td style="font-size:12px">${k.Guard||'<span style="color:var(--muted)">—</span>'}</td>
-      <td style="font-size:12px;color:var(--muted)">${k.IssuedDate||'—'}</td>
+      <td style="font-size:12px">${k.HeldBy||'<span style="color:var(--muted)">—</span>'}</td>
+      <td style="font-size:11px;color:var(--muted)">${k.HeldByRole||'—'}</td>
+      <td style="font-size:12px;color:var(--muted)">${k.PickupDate||'—'}</td>
       <td style="font-size:12px${days!==null&&days>=30?';color:var(--warn);font-weight:500':''}">
         ${days!==null?days+'d':'—'}</td>
       <td style="font-size:12px${lastCheckDays!==null&&lastCheckDays>=14?';color:var(--purple);font-weight:500':''}">
         ${k.LastCheckDate?lastCheckDays+'d ago':'—'}</td>
       <td>
-        <button class="act-btn" onclick="viewKey('${k.ID}')">View</button>
-        ${k.Status!=='In office'?`<button class="act-btn" onclick="openModal('return','${k.ID}')">Return</button>`:''}
-        ${checkDue?`<button class="act-btn" style="color:var(--purple);border-color:#c0a8e8" onclick="openModal('check','${k.ID}')">Check</button>`:''}
-        ${k.Status!=='Flagged'?`<button class="act-btn red" onclick="quickFlag('${k.ID}')">Flag</button>`:''}
+        <button class="act-btn" onclick="viewKey('${tid}')">View</button>
+        ${k.HeldBy?`<button class="act-btn" onclick="openModal('return','${tid}')">Return</button>`:''}
+        ${checkDue?`<button class="act-btn" style="color:var(--purple);border-color:#c0a8e8" onclick="openModal('check','${tid}')">Check</button>`:''}
+        ${k.Status!=='Flagged'?`<button class="act-btn red" onclick="quickFlag('${tid}')">Flag</button>`:''}
       </td>
     </tr>`;
   }).join('');
@@ -569,7 +572,7 @@ function renderTable(){
 
 // ── REMINDERS ─────────────────────────────────────
 function renderReminders(){
-  const dueKeys=keys.filter(needsCheck).sort((a,b)=>daysOut(b.LastCheckDate||b.IssuedDate)-daysOut(a.LastCheckDate||a.IssuedDate));
+  const dueKeys=keys.filter(needsCheck).sort((a,b)=>daysOut(b.LastCheckDate||b.PickupDate)-daysOut(a.LastCheckDate||a.PickupDate));
   const container=document.getElementById('reminders-list');
   if(!dueKeys.length){
     container.innerHTML='<div class="section-empty">✓ No custody checks due right now.<br>All issued keys/fobs have been verified within the last 14 days.</div>';
@@ -757,18 +760,31 @@ function openModal(type,id){
   else if(type==='addKey'){
     m.innerHTML=`<h3>Add key / fob to inventory</h3>
     <div class="mf">
-      <div class="fg"><label>ID</label><input id="mf-id" placeholder="e.g. CIBC-K-008"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label>Transit #</label><input id="mf-transit" placeholder="e.g. MTL-008"></div>
+        <div class="fg"><label>Key / Fob number</label><input id="mf-keynum" placeholder="e.g. K-2241"></div>
+      </div>
       <div class="fg"><label>Type</label><select id="mf-type"><option>Key</option><option>Fob</option></select></div>
       <div class="fg"><label>Client</label><select id="mf-client">${clientOpts}</select></div>
       <div class="fg"><label>Branch / location</label><input id="mf-loc" placeholder="e.g. CIBC Branch – Laval"></div>
       <div class="fg"><label>How received</label>
-        <select id="mf-recv"><option>Sent to us by bank</option><option>Guard picked up from bank</option><option>Sent to pickup address</option></select></div>
-      <div class="fg"><label>Notes</label><textarea id="mf-notes" placeholder="Access areas, conditions…"></textarea></div>
+        <select id="mf-recv"><option>Sent to us by bank</option><option>Picked up from bank by manager</option><option>Sent to pickup address</option></select></div>
+      <div class="fg"><label>Photo of key / fob <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+        <input type="file" id="mf-photo" accept="image/*" style="font-family:var(--ff);font-size:13px;padding:6px;width:100%">
+        <div id="photo-preview" style="margin-top:6px"></div>
+      </div>
+      <div class="fg"><label>Notes</label><textarea id="mf-notes" placeholder="Access areas, conditions, restrictions…"></textarea></div>
     </div>
     <div class="modal-actions">
       <button class="btn-outline" onclick="closeModal()">Cancel</button>
       <button class="btn-action" onclick="doAddKey()">Add to inventory</button>
-    </div>`;
+    </div>
+    <script>document.getElementById('mf-photo').onchange=function(){
+      const f=this.files[0];if(!f)return;
+      const r=new FileReader();r.onload=e=>{
+        document.getElementById('photo-preview').innerHTML='<img src="'+e.target.result+'" style="max-width:100%;max-height:120px;border-radius:4px;border:1px solid var(--border)">';
+      };r.readAsDataURL(f);
+    }<\/script>`;
   }
   else if(type==='issue'){
     const availOpts=availableKeys.map(k=>`<option value="${k.Transit||k.KeyNumber}">${k.Transit} / ${k.KeyNumber} — ${k.Client} — ${k.Location}</option>`).join('')||'<option>None available</option>';
@@ -832,9 +848,9 @@ function openModal(type,id){
     <\/script>`;
   }
   else if(type==='check'){
-    const k=keys.find(x=>x.ID===id);
+    const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);
     if(!k)return;
-    const daysSince=daysOut(k.LastCheckDate||k.IssuedDate);
+    const daysSince=daysOut(k.LastCheckDate||k.PickupDate);
     m.innerHTML=`<h3>Bi-weekly custody check — ${id}</h3>
     <div class="info-box">
       Last check: <strong>${k.LastCheckDate||'Never'}</strong> (${daysSince} days ago)<br>
@@ -861,7 +877,7 @@ function openModal(type,id){
     </div>`;
   }
   else if(type==='view'){
-    const k=keys.find(x=>x.ID===id);
+    const k=keys.find(x=>x.Transit===id||x.KeyNumber===id);
     if(!k)return;
     const days=daysOut(k.PickupDate);
     const checkDays=daysOut(k.LastCheckDate||k.PickupDate);
