@@ -110,6 +110,13 @@ main{max-width:1320px;margin:0 auto;padding:1.25rem 1.5rem}
 .btn-action.green{background:var(--ok)}
 
 .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r2);background:var(--surface)}
+.pagination{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-top:1px solid var(--border);background:var(--surface);border-radius:0 0 var(--r2) var(--r2);font-size:13px}
+.pagination .pg-info{color:var(--muted);font-size:12px;font-family:var(--mono)}
+.pagination .pg-btns{display:flex;gap:4px;align-items:center}
+.pg-btn{padding:4px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);font-family:var(--ff);font-size:12px;cursor:pointer;color:var(--text);transition:background .12s;min-width:32px;text-align:center}
+.pg-btn:hover:not(:disabled){background:var(--off)}
+.pg-btn:disabled{color:var(--muted);cursor:default;opacity:.5}
+.pg-btn.active{background:var(--black);color:var(--white);border-color:var(--black)}
 table{width:100%;border-collapse:collapse;font-size:13px;min-width:860px}
 thead th{padding:9px 13px;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);background:var(--off);border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
 tbody td{padding:10px 13px;border-bottom:1px solid var(--border);vertical-align:middle}
@@ -298,13 +305,13 @@ tbody tr:hover td{background:#faf8f4}
     <!-- INVENTORY -->
     <div id="tab-inventory">
       <div class="toolbar">
-        <input type="text" id="q" placeholder="Search ID, location, guard…" oninput="renderTable()">
-        <select id="f-status" onchange="renderTable()">
+        <input type="text" id="q" placeholder="Search ID, location, guard…" oninput="currentPage=1;renderTable()">
+        <select id="f-status" onchange="currentPage=1;renderTable()">
           <option value="">All statuses</option>
           <option>With Staff</option><option>Issued</option><option>Overdue</option><option>Flagged</option><option>Returned to Bank</option>
         </select>
-        <select id="f-client" onchange="renderTable()"><option value="">All clients</option></select>
-        <select id="f-type" onchange="renderTable()">
+        <select id="f-client" onchange="currentPage=1;renderTable()"><option value="">All clients</option></select>
+        <select id="f-type" onchange="currentPage=1;renderTable()">
           <option value="">Keys &amp; Fobs</option><option>Key</option><option>Fob</option>
         </select>
         <div class="spacer"></div>
@@ -317,6 +324,10 @@ tbody tr:hover td{background:#faf8f4}
           </tr></thead>
           <tbody id="tbl-body"></tbody>
         </table>
+        <div class="pagination" id="tbl-pagination" style="display:none">
+          <div class="pg-info" id="pg-info"></div>
+          <div class="pg-btns" id="pg-btns"></div>
+        </div>
       </div>
     </div>
 
@@ -511,8 +522,10 @@ let _savingInProgress=false;
 function startAutoRefresh(){
   if(_autoRefreshTimer)clearInterval(_autoRefreshTimer);
   _autoRefreshTimer=setInterval(()=>{
-    if(!CFG.demo&&document.visibilityState!=='hidden'&&!_savingInProgress)loadData(true);
-  },30000);
+    // Only auto-refresh if tab is visible AND no modal is open
+    const modalOpen=document.getElementById('modal-overlay')&&document.getElementById('modal-overlay').classList.contains('open');
+    if(!CFG.demo&&document.visibilityState!=='hidden'&&!_savingInProgress&&!modalOpen)loadData(true);
+  },60000);
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible'&&!CFG.demo)loadData(true);
@@ -584,11 +597,23 @@ function populateClientFilter(){
   if(cur)sel.value=cur;
 }
 
+function fmtDate(dateStr){
+  if(!dateStr||dateStr==='—')return'—';
+  // Handle ISO timestamps from Google Sheets e.g. 2026-05-14T23:00:00.000Z
+  // Use UTC date to avoid timezone shifting the day
+  const d=new Date(dateStr);
+  if(isNaN(d))return dateStr;
+  // Format as "May 14, 2026"
+  return d.toLocaleDateString('en-CA',{year:'numeric',month:'short',day:'numeric',timeZone:'UTC'});
+}
 function daysOut(dateStr){
   if(!dateStr)return null;
   const d=new Date(dateStr);
   if(isNaN(d))return null;
-  return Math.floor((NOW()-d)/86400000);
+  // Use UTC midnight to avoid timezone day-shift errors
+  const utcD=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());
+  const utcNow=Date.UTC(NOW().getFullYear(),NOW().getMonth(),NOW().getDate());
+  return Math.floor((utcNow-utcD)/86400000);
 }
 
 function statusBadge(s,checkDue){
@@ -599,18 +624,31 @@ function statusBadge(s,checkDue){
 }
 
 // ── INVENTORY ─────────────────────────────────────
-function renderTable(){
+const PAGE_SIZE=10;
+let currentPage=1;
+let lastFiltered=[];
+
+function renderTable(resetPage){
+  if(resetPage)currentPage=1;
   const q=(document.getElementById('q').value||'').toLowerCase();
   const fs=document.getElementById('f-status').value;
   const fc=document.getElementById('f-client').value;
   const ft=document.getElementById('f-type').value;
-  const filtered=keys.filter(k=>{
+  lastFiltered=keys.filter(k=>{
     const hay=((k.Transit||'')+(k.KeyNumber||'')+k.Location+(k.HeldBy||'')+k.Client+k.Type).toLowerCase();
     return(!q||hay.includes(q))&&(!fs||k.Status===fs)&&(!fc||k.Client===fc)&&(!ft||k.Type===ft);
   });
   const body=document.getElementById('tbl-body');
-  if(!filtered.length){body.innerHTML='<tr class="empty-row"><td colspan="12">No records match filters</td></tr>';return}
-  body.innerHTML=filtered.map(k=>{
+  if(!lastFiltered.length){
+    body.innerHTML='<tr class="empty-row"><td colspan="12">No records match filters</td></tr>';
+    document.getElementById('tbl-pagination').style.display='none';
+    return;
+  }
+  const totalPages=Math.ceil(lastFiltered.length/PAGE_SIZE);
+  if(currentPage>totalPages)currentPage=totalPages;
+  const start=(currentPage-1)*PAGE_SIZE;
+  const pageItems=lastFiltered.slice(start,start+PAGE_SIZE);
+  body.innerHTML=pageItems.map(k=>{
     const days=daysOut(k.PickupDate);
     const checkDue=needsCheck(k);
     const lastCheckDays=daysOut(k.LastCheckDate||k.PickupDate);
@@ -625,11 +663,11 @@ function renderTable(){
       <td>${statusBadge(k.Status,checkDue)}</td>
       <td style="font-size:12px">${k.HeldBy||'<span style="color:var(--muted)">—</span>'}</td>
       <td style="font-size:11px;color:var(--muted)">${k.HeldByRole||'—'}</td>
-      <td style="font-size:12px;color:var(--muted)">${k.PickupDate||'—'}</td>
+      <td style="font-size:12px;color:var(--muted)">${fmtDate(k.PickupDate)}</td>
       <td style="font-size:12px${days!==null&&days>=30?';color:var(--warn);font-weight:500':''}">
         ${days!==null?days+'d':'—'}</td>
       <td style="font-size:12px${lastCheckDays!==null&&lastCheckDays>=14?';color:var(--purple);font-weight:500':''}">
-        ${k.LastCheckDate?lastCheckDays+'d ago':'—'}</td>
+        ${k.LastCheckDate?fmtDate(k.LastCheckDate)+' ('+lastCheckDays+'d ago)':'—'}</td>
       <td>
         <button class="act-btn" onclick="viewKey('${tid}')">View</button>
         ${k.HeldBy?`<button class="act-btn" onclick="openModal('return','${tid}')">Return</button>`:''}
@@ -638,6 +676,36 @@ function renderTable(){
       </td>
     </tr>`;
   }).join('');
+  // Pagination bar
+  const pgBar=document.getElementById('tbl-pagination');
+  const pgInfo=document.getElementById('pg-info');
+  const pgBtns=document.getElementById('pg-btns');
+  if(lastFiltered.length<=PAGE_SIZE){pgBar.style.display='none';return;}
+  pgBar.style.display='flex';
+  pgInfo.textContent=(start+1)+'–'+Math.min(start+PAGE_SIZE,lastFiltered.length)+' of '+lastFiltered.length+' keys';
+  // Build page buttons — show max 5 page numbers
+  let btns='<button class="pg-btn" onclick="goPage('+(currentPage-1)+')" '+(currentPage===1?'disabled':'')+'>‹</button>';
+  const maxBtns=5;
+  let pStart=Math.max(1,currentPage-Math.floor(maxBtns/2));
+  let pEnd=Math.min(totalPages,pStart+maxBtns-1);
+  if(pEnd-pStart<maxBtns-1)pStart=Math.max(1,pEnd-maxBtns+1);
+  if(pStart>1)btns+='<button class="pg-btn" onclick="goPage(1)">1</button>'+(pStart>2?'<span style="padding:0 4px;color:var(--muted)">…</span>':'');
+  for(let i=pStart;i<=pEnd;i++){
+    btns+='<button class="pg-btn'+(i===currentPage?' active':'')+'" onclick="goPage('+i+')">'+i+'</button>';
+  }
+  if(pEnd<totalPages)btns+=(pEnd<totalPages-1?'<span style="padding:0 4px;color:var(--muted)">…</span>':'')+'<button class="pg-btn" onclick="goPage('+totalPages+')">'+totalPages+'</button>';
+  btns+='<button class="pg-btn" onclick="goPage('+(currentPage+1)+')" '+(currentPage===totalPages?'disabled':'')+'>›</button>';
+  pgBtns.innerHTML=btns;
+}
+
+function goPage(p){
+  const totalPages=Math.ceil(lastFiltered.length/PAGE_SIZE);
+  if(p<1||p>totalPages)return;
+  currentPage=p;
+  renderTable();
+  // Scroll table into view
+  const tw=document.getElementById('tbl-body');
+  if(tw)tw.closest('.table-wrap').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
 // ── REMINDERS ─────────────────────────────────────
@@ -660,7 +728,7 @@ function renderReminders(){
       <div class="rc-body">
         <div class="rc-title">${k.ID} — ${k.Location}</div>
         <div class="rc-meta">
-          Client: <strong>${k.Client}</strong> &nbsp;·&nbsp; Currently with: <strong>${k.HeldBy||'Unknown'}</strong> (${k.HeldByRole||'—'}) &nbsp;·&nbsp; Pickup: ${k.PickupDate||'—'}<br>
+          Client: <strong>${k.Client}</strong> &nbsp;·&nbsp; Currently with: <strong>${k.HeldBy||'Unknown'}</strong> (${k.HeldByRole||'—'}) &nbsp;·&nbsp; Pickup: ${fmtDate(k.PickupDate)}<br>
           Last custody check: ${k.LastCheckDate||'Never recorded'} <strong style="color:${isUrgent?'var(--accent)':'var(--warn)'}">— ${daysSinceCheck}d ago</strong>
           ${guardChanged?`<br>⚠️ Previous holder was <strong>${prevGuard}</strong> — confirm current custody`:''}
         </div>
@@ -745,7 +813,7 @@ function renderAudit(){
   list.innerHTML=filtered.map(e=>{
     const[cls,icon]=iconMap[e.Action]||['ai-added','<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>'];
     const dt=e.Timestamp?new Date(e.Timestamp):null;
-    const ts=dt?dt.toLocaleString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+    const ts=dt?dt.toLocaleString('en-CA',{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
     return`<div class="audit-item">
       <div class="audit-icon ${cls}">${icon}</div>
       <div class="audit-body">
@@ -910,10 +978,11 @@ function openModal(type,id){
         <div id="issue-current-holder" style="padding:7px 11px;background:var(--off);border-radius:var(--r);font-size:13px;color:var(--muted)">— select a key first —</div>
       </div>
       <div class="fg"><label>Issue to (new holder)</label>
-        <select id="mf-guard" onchange="onGuardSelect(this.value)">
-          <option value="">— Select a guard —</option>
-          ${guardDropOpts}
-        </select>
+        <input id="mf-guard-search" list="gl-guards" placeholder="Type name to search or scroll list…"
+          oninput="onGuardSearch(this.value)"
+          style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
+        <datalist id="gl-guards">${guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')}</datalist>
+        <input type="hidden" id="mf-guard">
         <div id="guard-contact-box" style="margin-top:4px"></div>
       </div>
       <div class="fg"><label>Recipient role</label>
@@ -1006,7 +1075,7 @@ function openModal(type,id){
     const daysSince=daysOut(k.LastCheckDate||k.PickupDate);
     m.innerHTML=`<h3>Bi-weekly custody check — ${id}</h3>
     <div class="info-box">
-      Last check: <strong>${k.LastCheckDate||'Never'}</strong> (${daysSince} days ago)<br>
+      Last check: <strong>${k.LastCheckDate?fmtDate(k.LastCheckDate):'Never'}</strong> (${daysSince} days ago)<br>
       Currently recorded with: <strong>${k.HeldBy||'Unknown'}</strong> (${k.HeldByRole||'—'})<br>
       Use this form to confirm the guard still holds the key, OR to record that it was handed to someone else.
     </div>
@@ -1018,7 +1087,14 @@ function openModal(type,id){
         </select>
       </div>
       <div id="handoff-fields" style="display:none">
-        <div class="fg"><label>New holder name</label><input id="mf-newguard" list="gl3" placeholder="Name of new holder"><datalist id="gl3">${guardOpts}</datalist></div>
+        <div class="fg"><label>New holder</label>
+          <input id="mf-newguard-search" list="gl-check-guards" placeholder="Type name to search or scroll list…"
+            oninput="onCheckGuardSearch(this.value)"
+            style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
+          <datalist id="gl-check-guards">${guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')}</datalist>
+          <input type="hidden" id="mf-newguard">
+          <div id="check-guard-contact-box" style="margin-top:4px"></div>
+        </div>
         <div class="fg"><label>Reason for handoff</label><input id="mf-handoff-reason" placeholder="e.g. Shift change, reassignment…"></div>
       </div>
       <div class="fg"><label>Verified by (your name)</label><input id="mf-checker" value="${CFG.name}" placeholder="Manager name"></div>
@@ -1090,13 +1166,13 @@ function openModal(type,id){
         <tr><td>Location</td><td style="font-size:12px">${k.Location}</td></tr>
         <tr><td>Status</td><td>${statusBadge(k.Status,needsCheck(k))}</td></tr>
         <tr><td>Held by</td><td>${k.HeldBy?`<strong>${k.HeldBy}</strong> <span style="color:var(--muted);font-size:12px">(${k.HeldByRole||'—'})</span>${guardContactHtml(k.HeldBy)}`:'<span style="color:var(--muted)">Not assigned</span>'}</td></tr>
-        <tr><td>Pickup date</td><td>${k.PickupDate||'—'}</td></tr>
+        <tr><td>Pickup date</td><td>${fmtDate(k.PickupDate)}</td></tr>
         <tr><td>Days out</td><td>${days!==null?`<strong${days>=30?' style="color:var(--warn)"':''}>` +days+' days</strong>':'—'}</td></tr>
         <tr><td>Last check</td><td style="${checkDays>=14?'color:var(--purple);font-weight:500':''}">
-          ${k.LastCheckDate||'Never'}${k.PickupDate&&checkDays!==null?' ('+checkDays+'d ago)':''}</td></tr>
+          ${k.LastCheckDate?fmtDate(k.LastCheckDate)+' ('+checkDays+'d ago)':'Never'}</td></tr>
         <tr><td>Last returned to</td><td style="font-size:12px">${k.ReturnedTo||'—'}</td></tr>
         <tr><td>Notes</td><td style="font-size:12px;line-height:1.5">${k.Notes||'—'}</td></tr>
-        <tr><td>Added</td><td style="font-size:12px;color:var(--muted)">${k.AddedDate||'—'}</td></tr>
+        <tr><td>Added</td><td style="font-size:12px;color:var(--muted)">${fmtDate(k.AddedDate)}</td></tr>
       </table>
     </div>
     ${recentAudit.length?`<div style="margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem">
@@ -1170,23 +1246,28 @@ async function doAddKey(){
   // Uniqueness is Transit + KeyNumber combined — same transit can have multiple keys
   if(keys.find(k=>k.Transit===transit&&k.KeyNumber===keynum)){toast('This Transit + Key/Fob number already exists',true);return}
   const today=new Date().toISOString().split('T')[0];
-  // Handle multiple photos
-  let photoData='';
+  // Add key immediately with no photo — close modal and render right away
+  const row={Transit:transit,KeyNumber:keynum,Type:type,Client:client,Location:loc,Status:'With Staff',HeldBy:CFG.name,HeldByRole:'Manager',PickupDate:today,LastCheckDate:today,ReturnedTo:'',Photo:'',Notes:notes,AddedDate:today};
+  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:transit+'-'+keynum,Guard:CFG.name,Note:'Received via: '+recvNote+'. Key#: '+keynum+'. '+notes,Manager:CFG.name};
+  keys.push(row);audit.unshift(logRow);closeModal();renderAll();toast('Added ✓');
+  // Read photos and save to Sheet in background — no UI blocking
   const photoFile=document.getElementById('mf-photo');
+  let photoData='';
   if(photoFile&&photoFile.files.length>0){
     const promises=Array.from(photoFile.files).map(f=>new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(f);}));
     const results=await Promise.all(promises);
     photoData=results.join('||PHOTO||');
+    row.Photo=photoData; // update the already-pushed row
   }
-  const row={Transit:transit,KeyNumber:keynum,Type:type,Client:client,Location:loc,Status:'With Staff',HeldBy:CFG.name,HeldByRole:'Manager',PickupDate:today,LastCheckDate:today,ReturnedTo:'',Photo:photoData,Notes:notes,AddedDate:today};
-  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:`${transit}-${keynum}`,Guard:CFG.name,Note:`Received via: ${recvNote}. Key#: ${keynum}. ${notes}`,Manager:CFG.name};
-  keys.push(row);audit.unshift(logRow);closeModal();renderAll();
-  if(!CFG.demo){try{await writeRow('Keys',row);await writeRow('AuditLog',logRow);toast('Added ✓');}catch(e){toast('Saved locally – sync failed',true);}}
-  else toast('Added ✓');
+  if(!CFG.demo){
+    try{await writeRow('Keys',row);await writeRow('AuditLog',logRow);}
+    catch(e){toast('Added locally – Sheet sync failed',true);}
+  }
 }
 async function doIssue(){
   const tid=v('mf-key');
-  const guard=v('mf-guard');
+  const guardEl=document.getElementById('mf-guard-search');
+  const guard=guardEl?guardEl.value.trim():v('mf-guard');
   const roleSel=v('mf-role');
   const role=roleSel==='Other'?v('mf-role-custom'):roleSel;
   const note=v('mf-notes'),pickup=v('mf-pickup'),pickupDate=v('mf-pickupdate')||new Date().toISOString().split('T')[0];
@@ -1254,14 +1335,13 @@ async function doReturn(){
   k.ReturnedTo=returnedTo;k.PickupDate=returnDate;k.LastCheckDate=returnDate;
 
   const logRow={Timestamp:new Date().toISOString(),Action:'Returned',KeyID:k.Transit,Guard:returnedBy,Note:logNote,Manager:CFG.name};
-  audit.unshift(logRow);closeModal();renderAll();
+  audit.unshift(logRow);closeModal();renderAll();toast('Return logged ✓');
   if(!CFG.demo){
     try{
       await updateRow('Keys','Transit',k.Transit,{Status:newStatus,HeldBy:newHeldBy,HeldByRole:newHeldByRole,ReturnedTo:returnedTo,PickupDate:returnDate,LastCheckDate:returnDate});
       await writeRow('AuditLog',logRow);
-      toast('Return logged ✓');
-    }catch(e){toast('Saved locally – sync failed',true);}
-  } else toast('Return logged ✓');
+    }catch(e){toast('Return logged locally – Sheet sync failed',true);}
+  }
 }
 async function doCheck(keyId){
   const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===keyId||x.Transit===keyId||x.KeyNumber===keyId);if(!k)return;
@@ -1272,7 +1352,8 @@ async function doCheck(keyId){
   let noteText='';
   closeModal();
   if(custody==='handoff'){
-    const newGuard=v('mf-newguard');
+    const newGuardEl=document.getElementById('mf-newguard-search');
+    const newGuard=newGuardEl?newGuardEl.value.trim():v('mf-newguard');
     const reason=v('mf-handoff-reason');
     if(!newGuard){toast('Enter new guard name',true);return}
     const oldGuard=k.HeldBy;
@@ -1347,14 +1428,14 @@ async function doEditKey(oldTid){
   const oldKeynum=k.KeyNumber;
   k.Transit=newTransit;k.KeyNumber=newKeynum;k.Type=newType;
   k.Client=newClient;k.Location=newLoc;k.Notes=newNotes;k.Photo=newPhoto;
-  const logRow={Timestamp:new Date().toISOString(),Action:'Edited',KeyID:newTransit+'-'+newKeynum,Guard:'',Note:`Edited by ${CFG.name}. Fields updated: transit, key#, type, client, location, notes/photos.`,Manager:CFG.name};
+  const logRow={Timestamp:new Date().toISOString(),Action:'Edited',KeyID:newTransit+'-'+newKeynum,Guard:'',Note:'Edited by '+CFG.name+'. Fields updated.',Manager:CFG.name};
   audit.unshift(logRow);
   closeModal();renderAll();toast('Key/Fob updated ✓');
   if(!CFG.demo){
     try{
       await updateRow('Keys','Transit',oldTransit,{Transit:newTransit,KeyNumber:newKeynum,Type:newType,Client:newClient,Location:newLoc,Notes:newNotes,Photo:newPhoto},oldKeynum);
       await writeRow('AuditLog',logRow);
-    }catch(e){toast('Saved locally – Sheet sync failed',true);}
+    }catch(e){toast('Updated locally – Sheet sync failed',true);}
   }
 }
 function quickFlag(id){doFlag(id)}
@@ -1378,24 +1459,23 @@ async function doDelete(type,id){
     if(idx===-1)return;
     const k=keys[idx];
     keys.splice(idx,1);
-    const logRow={Timestamp:new Date().toISOString(),Action:'Deleted',KeyID:k.Transit||id,Guard:'',Note:`Key/fob deleted by ${CFG.name}`,Manager:CFG.name};
+    const logRow={Timestamp:new Date().toISOString(),Action:'Deleted',KeyID:k.Transit||id,Guard:'',Note:'Key/fob deleted by '+CFG.name,Manager:CFG.name};
     audit.unshift(logRow);
-    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Keys',idField:'Transit',idValue:k.Transit});await writeRow('AuditLog',logRow);toast('Deleted ✓');}catch(e){toast('Deleted locally – sync may need manual cleanup',true);}}
-    else toast('Deleted ✓');
+    renderAll();toast('Deleted ✓');
+    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Keys',idField:'Transit',idValue:k.Transit});await writeRow('AuditLog',logRow);}catch(e){toast('Deleted locally – sync may need manual cleanup',true);}}
   } else if(type==='client'){
     const idx=clients.findIndex(c=>c.Name===id);
     if(idx===-1)return;
     clients.splice(idx,1);
-    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Clients',idField:'Name',idValue:id});toast('Client deleted ✓');}catch(e){toast('Deleted locally',true);}}
-    else toast('Client deleted ✓');
+    renderAll();toast('Client deleted ✓');
+    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Clients',idField:'Name',idValue:id});}catch(e){toast('Deleted locally',true);}}
   } else if(type==='guard'){
     const idx=guards.findIndex(g=>g.Name===id);
     if(idx===-1)return;
     guards.splice(idx,1);
-    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Guards',idField:'Name',idValue:id});toast('Guard deleted ✓');}catch(e){toast('Deleted locally',true);}}
-    else toast('Guard deleted ✓');
+    renderGuards();toast('Guard deleted ✓');
+    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Guards',idField:'Name',idValue:id});}catch(e){toast('Deleted locally',true);}}
   }
-  renderAll();renderGuards();
 }
 function viewKey(id){
   const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
@@ -1542,17 +1622,27 @@ function toggleBankContact(val){
   const box=document.getElementById('recv-bank-person-box');
   if(box)box.style.display=(val==='yes')?'':'none';
 }
-function onGuardSelect(val){
-  const contactBox=document.getElementById('guard-contact-box');
-  const roleSelect=document.getElementById('mf-role');
-  if(!val){if(contactBox)contactBox.innerHTML='';return;}
-  showGuardContact(val,'guard-contact-box');
+function onGuardSearch(val){
+  // Show contact info when a known guard name is typed/selected
   const g=getGuardInfo(val);
+  const box=document.getElementById('guard-contact-box');
+  if(box)box.innerHTML=g?guardContactHtml(val):'';
+  // Auto-fill role
+  const roleSelect=document.getElementById('mf-role');
   if(g&&g.Role&&roleSelect){
     for(let i=0;i<roleSelect.options.length;i++){
       if(roleSelect.options[i].value===g.Role){roleSelect.selectedIndex=i;break;}
     }
   }
+  // Store in hidden field for fallback
+  const hidden=document.getElementById('mf-guard');
+  if(hidden)hidden.value=val;
+}
+function onCheckGuardSearch(val){
+  const box=document.getElementById('check-guard-contact-box');
+  if(box)box.innerHTML=getGuardInfo(val)?guardContactHtml(val):'';
+  const hidden=document.getElementById('mf-newguard');
+  if(hidden)hidden.value=val;
 }
 function toggleOtherRole(val){
   const custom=document.getElementById('mf-role-custom');
