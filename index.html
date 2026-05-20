@@ -495,20 +495,29 @@ function reconfigure(){localStorage.removeItem('kft_config');location.reload()}
 // ── API ───────────────────────────────────────────
 async function apiCall(payload){
   if(CFG.demo)throw new Error('Demo');
-  // Apps Script cold start can take 10-20s — use 35s timeout
-  const fetchPromise=fetch(CFG.url,{
-    method:'POST',
-    headers:{'Content-Type':'text/plain'}, // avoid CORS preflight
-    body:JSON.stringify(payload)
-  });
-  const timeoutPromise=new Promise((_,reject)=>
-    setTimeout(()=>reject(new Error('Request timed out')),35000)
-  );
-  const r=await Promise.race([fetchPromise,timeoutPromise]);
+  // Google Apps Script requires no CORS preflight — use text/plain content type
+  // Timeout: 40s to handle cold starts (Apps Script can take 15-20s on first call)
+  let r;
+  try{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),40000);
+    r=await fetch(CFG.url,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify(payload),
+      signal:controller.signal
+    });
+    clearTimeout(timer);
+  }catch(e){
+    if(e.name==='AbortError')throw new Error('Request timed out — Apps Script is slow. Try again.');
+    throw new Error('Network error — check internet connection and Apps Script URL.');
+  }
+  if(!r.ok)throw new Error('Apps Script returned HTTP '+r.status+'. Redeploy the script.');
   const text=await r.text();
+  if(!text||text.trim()==='')throw new Error('Empty response from Apps Script. Redeploy as Web App.');
   let j;
   try{j=JSON.parse(text);}
-  catch(_){throw new Error('Apps Script returned invalid JSON. Check your deployment.');}
+  catch(_){throw new Error('Apps Script returned invalid response. Check deployment settings.');}
   if(j&&j.error)throw new Error('Sheet error: '+j.error);
   return j;
 }
@@ -553,15 +562,12 @@ async function loadData(silent=false){
     if(!silent)toast('Connected ✓ Data loaded');
   }catch(e){
     syncStatus('error');
-    // Show the app anyway with empty state — never block the user
     renderAll();
     if(!silent){
-      const msg=e.message&&e.message.includes('timed out')
-        ?'Google Sheet is slow to respond. Try refreshing in a moment.'
-        :'Could not reach Google Sheet. Check your Apps Script URL in ⚙ settings.';
+      const msg=e.message||'Unknown error';
       toast(msg,true);
+      console.error('loadData error:',e);
     }
-    console.error('loadData error:',e);
   }
   finally{
     hideLoading(); // ALWAYS hide loading, no matter what
