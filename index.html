@@ -305,7 +305,7 @@ tbody tr:hover td{background:#faf8f4}
     <!-- INVENTORY -->
     <div id="tab-inventory">
       <div class="toolbar">
-        <input type="text" id="q" placeholder="Search ID, location, guard…" oninput="currentPage=1;renderTable()">
+        <input type="text" id="q" placeholder="Search transit, key #, guard, location…" oninput="currentPage=1;renderTable()">
         <select id="f-status" onchange="currentPage=1;renderTable()">
           <option value="">All statuses</option>
           <option>With Staff</option><option>Issued</option><option>Overdue</option><option>Flagged</option><option>Returned to Bank</option>
@@ -313,6 +313,15 @@ tbody tr:hover td{background:#faf8f4}
         <select id="f-client" onchange="currentPage=1;renderTable()"><option value="">All clients</option></select>
         <select id="f-type" onchange="currentPage=1;renderTable()">
           <option value="">Keys &amp; Fobs</option><option>Key</option><option>Fob</option>
+        </select>
+        <input type="date" id="f-date-from" onchange="currentPage=1;renderTable()" title="Filter from date" style="height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:12px;color:var(--text);background:var(--surface)">
+        <input type="date" id="f-date-to" onchange="currentPage=1;renderTable()" title="Filter to date" style="height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:12px;color:var(--text);background:var(--surface)">
+        <select id="f-sort" onchange="currentPage=1;renderTable()" style="height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:12px;color:var(--text);background:var(--surface)">
+          <option value="date-desc">Newest first</option>
+          <option value="date-asc">Oldest first</option>
+          <option value="status">Status</option>
+          <option value="client">Client</option>
+          <option value="transit">Transit #</option>
         </select>
         <div class="spacer"></div>
         <button class="btn-outline" onclick="exportCSV()">↓ CSV</button>
@@ -486,10 +495,14 @@ function reconfigure(){localStorage.removeItem('kft_config');location.reload()}
 // ── API ───────────────────────────────────────────
 async function apiCall(payload){
   if(CFG.demo)throw new Error('Demo');
-  const r=await fetch(CFG.url,{method:'POST',body:JSON.stringify(payload)});
-  const j=await r.json();
-  if(j.error)throw new Error(j.error);
-  return j;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),8000); // 8s timeout
+  try{
+    const r=await fetch(CFG.url,{method:'POST',body:JSON.stringify(payload),signal:controller.signal});
+    const j=await r.json();
+    if(j.error)throw new Error(j.error);
+    return j;
+  }finally{clearTimeout(timer);}
 }
 async function loadData(silent=false){
   if(CFG.demo){renderAll();return}
@@ -527,8 +540,11 @@ function startAutoRefresh(){
     if(!CFG.demo&&document.visibilityState!=='hidden'&&!_savingInProgress&&!modalOpen)loadData(true);
   },60000);
 }
+// Only reload from Sheet if tab was hidden for more than 2 minutes
+let _hiddenAt=0;
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible'&&!CFG.demo)loadData(true);
+  if(document.visibilityState==='hidden'){_hiddenAt=Date.now();}
+  else if(!CFG.demo&&Date.now()-_hiddenAt>120000)loadData(true);
 });
 async function writeRow(sheet,row){if(CFG.demo)return;await apiCall({action:'appendRow',sheet,row})}
 async function updateRow(sheet,idField,idValue,updates,keyNumber){
@@ -538,13 +554,30 @@ async function updateRow(sheet,idField,idValue,updates,keyNumber){
 }
 
 // ── RENDER ALL ────────────────────────────────────
+// Full render — only called on initial load or full refresh
 function renderAll(){
   checkOverdue();
   updateStats();
   populateClientFilter();
   renderTable();
-  renderReminders();
-  renderClients();
+  if(currentTab==='reminders')renderReminders();
+  if(currentTab==='clients')renderClients();
+  if(currentTab==='guards')renderGuards();
+  if(currentTab==='audit')renderAudit();
+}
+
+// Fast render — only updates what changed after an action
+// type: 'key' | 'client' | 'guard' | 'audit'
+function fastRender(type){
+  checkOverdue();
+  updateStats();
+  if(type==='key'||type==='all'){
+    renderTable();
+    if(currentTab==='reminders')renderReminders();
+  }
+  if(type==='client')populateClientFilter();
+  if(currentTab==='clients'&&(type==='client'||type==='all'))renderClients();
+  if(currentTab==='guards'&&(type==='guard'||type==='all'))renderGuards();
   if(currentTab==='audit')renderAudit();
 }
 
@@ -634,9 +667,46 @@ function renderTable(resetPage){
   const fs=document.getElementById('f-status').value;
   const fc=document.getElementById('f-client').value;
   const ft=document.getElementById('f-type').value;
+  const dateFrom=document.getElementById('f-date-from')?document.getElementById('f-date-from').value:'';
+  const dateTo=document.getElementById('f-date-to')?document.getElementById('f-date-to').value:'';
+  const sortBy=document.getElementById('f-sort')?document.getElementById('f-sort').value:'date-desc';
   lastFiltered=keys.filter(k=>{
     const hay=((k.Transit||'')+(k.KeyNumber||'')+k.Location+(k.HeldBy||'')+k.Client+k.Type).toLowerCase();
-    return(!q||hay.includes(q))&&(!fs||k.Status===fs)&&(!fc||k.Client===fc)&&(!ft||k.Type===ft);
+    const matchQ=!q||hay.includes(q);
+    const matchS=!fs||k.Status===fs;
+    const matchC=!fc||k.Client===fc;
+    const matchT=!ft||k.Type===ft;
+    // Date filter on PickupDate
+    const kDate=k.PickupDate?k.PickupDate.split('T')[0]:'';
+    const matchFrom=!dateFrom||kDate>=dateFrom;
+    const matchTo=!dateTo||kDate<=dateTo;
+    return matchQ&&matchS&&matchC&&matchT&&matchFrom&&matchTo;
+  });
+  // Sort: not-issued (With Staff) first by default, then by selected sort
+  const statusOrder={'With Staff':0,'Issued':1,'Overdue':2,'Flagged':3,'Returned to Bank':4};
+  lastFiltered.sort((a,b)=>{
+    if(sortBy==='date-desc'){
+      // Not-issued keys first, then by date newest
+      const aNotIssued=a.Status==='With Staff'?0:1;
+      const bNotIssued=b.Status==='With Staff'?0:1;
+      if(aNotIssued!==bNotIssued)return aNotIssued-bNotIssued;
+      const aDate=a.AddedDate||a.PickupDate||'';
+      const bDate=b.AddedDate||b.PickupDate||'';
+      return bDate.localeCompare(aDate); // newest first
+    }
+    if(sortBy==='date-asc'){
+      const aDate=a.AddedDate||a.PickupDate||'';
+      const bDate=b.AddedDate||b.PickupDate||'';
+      return aDate.localeCompare(bDate);
+    }
+    if(sortBy==='status'){
+      const aO=statusOrder[a.Status]??9;
+      const bO=statusOrder[b.Status]??9;
+      return aO-bO;
+    }
+    if(sortBy==='client')return(a.Client||'').localeCompare(b.Client||'');
+    if(sortBy==='transit')return(a.Transit||'').localeCompare(b.Transit||'');
+    return 0;
   });
   const body=document.getElementById('tbl-body');
   if(!lastFiltered.length){
@@ -726,16 +796,22 @@ function renderReminders(){
     return`<div class="reminder-card ${cls}">
       <div class="rc-icon">${icon}</div>
       <div class="rc-body">
-        <div class="rc-title">${k.ID} — ${k.Location}</div>
+        <div class="rc-title">
+          Transit: <span style="font-family:var(--mono);font-weight:600">${k.Transit||'—'}</span>
+          &nbsp;/&nbsp; Key #: <span style="font-family:var(--mono)">${k.KeyNumber||'—'}</span>
+          &nbsp;·&nbsp; <span class="tag-type">${k.Type||'—'}</span>
+        </div>
         <div class="rc-meta">
-          Client: <strong>${k.Client}</strong> &nbsp;·&nbsp; Currently with: <strong>${k.HeldBy||'Unknown'}</strong> (${k.HeldByRole||'—'}) &nbsp;·&nbsp; Pickup: ${fmtDate(k.PickupDate)}<br>
-          Last custody check: ${k.LastCheckDate||'Never recorded'} <strong style="color:${isUrgent?'var(--accent)':'var(--warn)'}">— ${daysSinceCheck}d ago</strong>
+          Client: <strong>${k.Client}</strong> &nbsp;·&nbsp; Location: ${k.Location||'—'}<br>
+          Guard: <strong>${k.HeldBy||'Unknown'}</strong> (${k.HeldByRole||'—'}) &nbsp;·&nbsp; Pickup: ${fmtDate(k.PickupDate)}<br>
+          Last custody check: <strong>${k.LastCheckDate?fmtDate(k.LastCheckDate):'Never recorded'}</strong>
+          <strong style="color:${isUrgent?'var(--accent)':'var(--warn)'}"> — ${daysSinceCheck} days ago</strong>
           ${guardChanged?`<br>⚠️ Previous holder was <strong>${prevGuard}</strong> — confirm current custody`:''}
         </div>
         <div class="rc-actions">
-          <button class="btn-action green" onclick="openModal('check','${k.Transit||k.KeyNumber||k.ID}')">✓ Record custody check</button>
-          <button class="btn-action" onclick="openModal('return','${k.Transit||k.KeyNumber||k.ID}')">Log return</button>
-          <button class="btn-action red" onclick="quickFlag('${k.Transit||k.KeyNumber||k.ID}')">Flag missing</button>
+          <button class="btn-action green" onclick="openModal('check','${(k.Transit||'')+'-'+(k.KeyNumber||'')}')">✓ Record custody check</button>
+          <button class="btn-action" onclick="openModal('return','${(k.Transit||'')+'-'+(k.KeyNumber||'')}')">Log return</button>
+          <button class="btn-action red" onclick="quickFlag('${(k.Transit||'')+'-'+(k.KeyNumber||'')}')">Flag missing</button>
         </div>
       </div>
     </div>`;
@@ -900,6 +976,10 @@ function openModal(type,id){
     </div>`;
   }
   else if(type==='addKey'){
+    const today=new Date().toISOString().split('T')[0];
+    const guardPickupOpts=guards.length
+      ? guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')
+      : '';
     m.innerHTML=`<h3>Add key / fob to inventory</h3>
     <div class="mf">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -923,9 +1003,7 @@ function openModal(type,id){
         </select>
       </div>
       <div id="recv-bank-contact-box" style="display:none">
-        <div class="fg"><label>Bank address</label>
-          <input id="mf-bank-addr" placeholder="e.g. 1155 René-Lévesque Blvd W, Montreal">
-        </div>
+        <div class="fg"><label>Bank address</label><input id="mf-bank-addr" placeholder="e.g. 1155 René-Lévesque Blvd W, Montreal"></div>
         <div class="fg"><label>Was anyone present at the bank?</label>
           <select id="mf-bank-present" onchange="toggleBankContact(this.value)">
             <option value="yes">Yes — someone was there</option>
@@ -933,16 +1011,63 @@ function openModal(type,id){
           </select>
         </div>
         <div id="recv-bank-person-box">
-          <div class="fg"><label>Name of person at the bank</label>
-            <input id="mf-bank-person" placeholder="e.g. Pierre Gagnon — CIBC Security">
-          </div>
+          <div class="fg"><label>Name of person at the bank</label><input id="mf-bank-person" placeholder="e.g. Pierre Gagnon — CIBC Security"></div>
         </div>
       </div>
       <div id="recv-address-box" style="display:none">
-        <div class="fg"><label>Pickup / delivery address</label>
-          <input id="mf-recv-addr" placeholder="Enter the full address">
+        <div class="fg"><label>Pickup / delivery address</label><input id="mf-recv-addr" placeholder="Enter the full address"></div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);margin:1rem 0;padding-top:1rem">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:.75rem">Pickup details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fg"><label>Pickup date</label>
+            <input type="date" id="mf-pickup-date" value="${today}">
+          </div>
+          <div class="fg"><label>Role of person who picked it up</label>
+            <select id="mf-pickedby-role">
+              <option value="Manager">Manager</option>
+              <option value="Supervisor">Supervisor</option>
+              <option value="Guard">Guard</option>
+              <option value="Mobile">Mobile</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+        <div class="fg"><label>Picked up by</label>
+          <input id="mf-pickedby-search" list="gl-pickedby" placeholder="Type name or select from guards list…"
+            oninput="onPickedBySearch(this.value)"
+            style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
+          <datalist id="gl-pickedby">
+            ${guardPickupOpts}
+            <option value="${CFG.name}">${CFG.name} (you)</option>
+          </datalist>
+          <div id="pickedby-contact-box" style="margin-top:4px"></div>
+        </div>
+        <div class="fg" style="display:flex;align-items:center;gap:10px;padding:6px 0">
+          <input type="checkbox" id="mf-issue-now" onchange="toggleIssueNow(this.checked)"
+            style="width:16px;height:16px;cursor:pointer;accent-color:var(--black)">
+          <label for="mf-issue-now" style="font-size:13px;cursor:pointer;text-transform:none;letter-spacing:0;color:var(--text);font-weight:400">
+            Issue directly to a guard after adding (key goes straight from pickup to a guard)
+          </label>
+        </div>
+        <div id="issue-now-fields" style="display:none;padding:10px;background:var(--blue-bg);border-radius:var(--r);margin-top:4px">
+          <div class="fg"><label>Issue to (guard)</label>
+            <input id="mf-issue-guard-search" list="gl-issue-guard"
+              placeholder="Type guard name or select…"
+              oninput="onIssueGuardSearch(this.value)"
+              style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none;background:white">
+            <datalist id="gl-issue-guard">${guardPickupOpts}</datalist>
+            <div id="issue-guard-contact-box" style="margin-top:4px"></div>
+          </div>
+          <div class="fg"><label>Guard role</label>
+            <select id="mf-issue-guard-role" style="background:white">
+              <option>Guard</option><option>Mobile</option><option>Supervisor</option><option>Manager</option>
+            </select>
+          </div>
         </div>
       </div>
+
       <div class="fg"><label>Photos of key / fob <span style="font-weight:400;color:var(--muted)">(optional — select multiple)</span></label>
         <input type="file" id="mf-photo" accept="image/*" multiple style="font-family:var(--ff);font-size:13px;padding:6px;width:100%">
         <div id="photo-preview" class="photo-gallery" style="margin-top:6px"></div>
@@ -953,16 +1078,14 @@ function openModal(type,id){
       <button class="btn-outline" onclick="closeModal()">Cancel</button>
       <button class="btn-action" onclick="doAddKey()">Add to inventory</button>
     </div>
-    <script>document.getElementById('mf-photo').onchange=function(){
+    <script>
+    document.getElementById('mf-photo').onchange=function(){
       const prev=document.getElementById('photo-preview');prev.innerHTML='';
-      Array.from(this.files).forEach(f=>{
-        const r=new FileReader();r.onload=e=>{
-          const img=document.createElement('img');img.src=e.target.result;
-          img.style.cssText='width:90px;height:90px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer';
-          prev.appendChild(img);
-        };r.readAsDataURL(f);
-      });
-    }<\/script>`;
+      Array.from(this.files).forEach(f=>{const r=new FileReader();r.onload=e=>{const img=document.createElement('img');img.src=e.target.result;img.style.cssText='width:90px;height:90px;object-fit:cover;border-radius:4px;border:1px solid var(--border);cursor:pointer';prev.appendChild(img);};r.readAsDataURL(f);});
+    };
+    // Pre-fill picked up by with current user
+    setTimeout(()=>{const pb=document.getElementById('mf-pickedby-search');if(pb&&!pb.value)pb.value='${CFG.name}';},30);
+    <\/script>`;
   }
   else if(type==='issue'){
     // ALL keys in database — no filter, guard to guard allowed
@@ -983,11 +1106,10 @@ function openModal(type,id){
         <div id="issue-current-holder" style="padding:7px 11px;background:var(--off);border-radius:var(--r);font-size:13px;color:var(--muted)">— select a key first —</div>
       </div>
       <div class="fg"><label>Issue to (new holder)</label>
-        <input id="mf-guard-search" list="gl-guards" placeholder="Type name to search or scroll list…"
-          oninput="onGuardSearch(this.value)"
-          style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
-        <datalist id="gl-guards">${guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')}</datalist>
-        <input type="hidden" id="mf-guard">
+        <select id="mf-guard" onchange="onGuardSearch(this.value)" style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none;height:auto">
+          <option value="">— Select a guard —</option>
+          ${guards.length?guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join(''):'<option disabled>No guards added yet — go to Guards tab</option>'}
+        </select>
         <div id="guard-contact-box" style="margin-top:4px"></div>
       </div>
       <div class="fg"><label>Recipient role</label>
@@ -1093,11 +1215,10 @@ function openModal(type,id){
       </div>
       <div id="handoff-fields" style="display:none">
         <div class="fg"><label>New holder</label>
-          <input id="mf-newguard-search" list="gl-check-guards" placeholder="Type name to search or scroll list…"
-            oninput="onCheckGuardSearch(this.value)"
-            style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
-          <datalist id="gl-check-guards">${guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join('')}</datalist>
-          <input type="hidden" id="mf-newguard">
+          <select id="mf-newguard" onchange="onCheckGuardSearch(this.value)" style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none;height:auto">
+            <option value="">— Select a guard —</option>
+            ${guards.length?guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}">${g.Name}${g.Role?' — '+g.Role:''}${g.Phone?' · '+g.Phone:''}</option>`).join(''):'<option disabled>No guards added yet</option>'}
+          </select>
           <div id="check-guard-contact-box" style="margin-top:4px"></div>
         </div>
         <div class="fg"><label>Reason for handoff</label><input id="mf-handoff-reason" placeholder="e.g. Shift change, reassignment…"></div>
@@ -1216,16 +1337,14 @@ async function doAddClient(){
   if(clients.find(c=>c.Name===name)){toast('Client already exists',true);return}
   const today=new Date().toISOString().split('T')[0];
   const row={Name:name,ContactName:v('mf-ccont'),ContactPhone:v('mf-cphone'),ContactEmail:v('mf-cemail'),Address:v('mf-caddr'),Notes:v('mf-cnotes'),AddedDate:today};
-  clients.push(row);closeModal();renderAll();
-  if(!CFG.demo){try{await writeRow('Clients',row);toast('Client added ✓');}catch(e){toast('Saved locally – sync failed',true);}}
-  else toast('Client added ✓');
+  clients.push(row);closeModal();fastRender('client');toast('Client added ✓');
+  if(!CFG.demo){try{await writeRow('Clients',row);}catch(e){toast('Saved locally – sync failed',true);}}
 }
 async function doEditClient(name){
   const c=clients.find(x=>x.Name===name);if(!c)return;
   c.ContactName=v('mf-ccont');c.ContactPhone=v('mf-cphone');c.ContactEmail=v('mf-cemail');c.Address=v('mf-caddr');c.Notes=v('mf-cnotes');
-  closeModal();renderAll();
-  if(!CFG.demo){try{await updateRow('Clients','Name',name,{ContactName:c.ContactName,ContactPhone:c.ContactPhone,ContactEmail:c.ContactEmail,Address:c.Address,Notes:c.Notes});toast('Client updated ✓');}catch(e){toast('Saved locally – sync failed',true);}}
-  else toast('Client updated ✓');
+  closeModal();fastRender('client');toast('Client updated ✓');
+  if(!CFG.demo){try{await updateRow('Clients','Name',name,{ContactName:c.ContactName,ContactPhone:c.ContactPhone,ContactEmail:c.ContactEmail,Address:c.Address,Notes:c.Notes});}catch(e){toast('Saved locally – sync failed',true);}}
 }
 function editClient(name){openModal('editClient',name)}
 
@@ -1251,10 +1370,25 @@ async function doAddKey(){
   // Uniqueness is Transit + KeyNumber combined — same transit can have multiple keys
   if(keys.find(k=>k.Transit===transit&&k.KeyNumber===keynum)){toast('This Transit + Key/Fob number already exists',true);return}
   const today=new Date().toISOString().split('T')[0];
+  const pickupDate=v('mf-pickup-date')||today;
+  const pickedBy=document.getElementById('mf-pickedby-search')?document.getElementById('mf-pickedby-search').value.trim():CFG.name;
+  const pickedByRole=v('mf-pickedby-role')||'Manager';
+  const issueNow=document.getElementById('mf-issue-now')&&document.getElementById('mf-issue-now').checked;
+  const issueGuard=document.getElementById('mf-issue-guard-search')?document.getElementById('mf-issue-guard-search').value.trim():'';
+  const issueGuardRole=v('mf-issue-guard-role')||'Guard';
+  if(issueNow&&!issueGuard){toast('Please enter the guard name to issue to',true);return}
+  // Determine who holds it: if issuing now, it goes to the guard; else to the person who picked it up
+  const finalHolder=issueNow?issueGuard:(pickedBy||CFG.name);
+  const finalRole=issueNow?issueGuardRole:pickedByRole;
+  const finalStatus=issueNow?'Issued':'With Staff';
   // Add key immediately with no photo — close modal and render right away
-  const row={Transit:transit,KeyNumber:keynum,Type:type,Client:client,Location:loc,Status:'With Staff',HeldBy:CFG.name,HeldByRole:'Manager',PickupDate:today,LastCheckDate:today,ReturnedTo:'',Photo:'',Notes:notes,AddedDate:today};
-  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:transit+'-'+keynum,Guard:CFG.name,Note:'Received via: '+recvNote+'. Key#: '+keynum+'. '+notes,Manager:CFG.name};
-  keys.push(row);audit.unshift(logRow);closeModal();renderAll();toast('Added ✓');
+  const row={Transit:transit,KeyNumber:keynum,Type:type,Client:client,Location:loc,Status:finalStatus,HeldBy:finalHolder,HeldByRole:finalRole,PickupDate:pickupDate,LastCheckDate:pickupDate,ReturnedTo:'',Photo:'',Notes:notes,AddedDate:today};
+  const addNote='Received via: '+recvNote+'. Key#: '+keynum+'. Picked up by: '+pickedBy+(issueNow?' → issued directly to: '+issueGuard:'')+'. '+notes;
+  const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:transit+'-'+keynum,Guard:finalHolder,Note:addNote,Manager:CFG.name};
+  // If issued directly, also log an issuance event
+  const issueLogRow=issueNow?{Timestamp:new Date().toISOString(),Action:'Issued',KeyID:transit+'-'+keynum,Guard:issueGuard,Note:'Issued directly on pickup. Pickup date: '+pickupDate+'. Picked up by: '+pickedBy,Manager:CFG.name}:null;
+  keys.push(row);audit.unshift(logRow);if(issueLogRow)audit.unshift(issueLogRow);
+  closeModal();fastRender('key');toast(issueNow?'Added & issued to '+issueGuard+' ✓':'Added ✓');
   // Read photos and save to Sheet in background — no UI blocking
   const photoFile=document.getElementById('mf-photo');
   let photoData='';
@@ -1265,14 +1399,17 @@ async function doAddKey(){
     row.Photo=photoData; // update the already-pushed row
   }
   if(!CFG.demo){
-    try{await writeRow('Keys',row);await writeRow('AuditLog',logRow);}
+    try{
+      await writeRow('Keys',row);
+      await writeRow('AuditLog',logRow);
+      if(issueLogRow)await writeRow('AuditLog',issueLogRow);
+    }
     catch(e){toast('Added locally – Sheet sync failed',true);}
   }
 }
 async function doIssue(){
   const tid=v('mf-key');
-  const guardEl=document.getElementById('mf-guard-search');
-  const guard=guardEl?guardEl.value.trim():v('mf-guard');
+  const guard=v('mf-guard');
   const roleSel=v('mf-role');
   const role=roleSel==='Other'?v('mf-role-custom'):roleSel;
   const note=v('mf-notes'),pickup=v('mf-pickup'),pickupDate=v('mf-pickupdate')||new Date().toISOString().split('T')[0];
@@ -1285,7 +1422,7 @@ async function doIssue(){
   const logRow={Timestamp:new Date().toISOString(),Action:'Issued',KeyID:k.Transit+'-'+k.KeyNumber,Guard:guard,Note:`${pickup}. Role: ${role}. Pickup: ${pickupDate}. ${note}`,Manager:CFG.name};
   audit.unshift(logRow);
   // Re-render stats and table WITHOUT closing modal — so user can issue another key
-  updateStats();renderTable();renderReminders();
+  fastRender('key');
   // Show success inside modal and reset key selection
   const selectedBox=document.getElementById('issue-key-selected');
   const holderBox=document.getElementById('issue-current-holder');
@@ -1340,7 +1477,7 @@ async function doReturn(){
   k.ReturnedTo=returnedTo;k.PickupDate=returnDate;k.LastCheckDate=returnDate;
 
   const logRow={Timestamp:new Date().toISOString(),Action:'Returned',KeyID:k.Transit,Guard:returnedBy,Note:logNote,Manager:CFG.name};
-  audit.unshift(logRow);closeModal();renderAll();toast('Return logged ✓');
+  audit.unshift(logRow);closeModal();fastRender('key');toast('Return logged ✓');
   if(!CFG.demo){
     try{
       await updateRow('Keys','Transit',k.Transit,{Status:newStatus,HeldBy:newHeldBy,HeldByRole:newHeldByRole,ReturnedTo:returnedTo,PickupDate:returnDate,LastCheckDate:returnDate});
@@ -1357,8 +1494,7 @@ async function doCheck(keyId){
   let noteText='';
   closeModal();
   if(custody==='handoff'){
-    const newGuardEl=document.getElementById('mf-newguard-search');
-    const newGuard=newGuardEl?newGuardEl.value.trim():v('mf-newguard');
+    const newGuard=v('mf-newguard');
     const reason=v('mf-handoff-reason');
     if(!newGuard){toast('Enter new guard name',true);return}
     const oldGuard=k.HeldBy;
@@ -1367,7 +1503,7 @@ async function doCheck(keyId){
     noteText=`Handoff: ${oldGuard} → ${newGuard}. Reason: ${reason}. ${notes}`;
     const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit,Guard:newGuard,Note:noteText,Manager:checker};
     audit.unshift(logRow);
-    renderAll();
+    fastRender('key');toast('Custody check recorded ✓');
     if(!CFG.demo){
       try{
         await updateRow('Keys','Transit',k.Transit,{HeldBy:newGuard,LastCheckDate:today});
@@ -1380,21 +1516,20 @@ async function doCheck(keyId){
     noteText=`Confirmed: same holder (${k.HeldBy}). ${notes}`;
     const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit,Guard:k.HeldBy,Note:noteText,Manager:checker};
     audit.unshift(logRow);
-    renderAll();
+    fastRender('key');toast('Custody check recorded ✓');
     if(!CFG.demo){
       try{
         await updateRow('Keys','Transit',k.Transit,{LastCheckDate:today});
         await writeRow('AuditLog',logRow);
-        toast('Custody check recorded ✓');
       }catch(e){toast('Saved locally — sync to Sheet failed',true);}
-    } else toast('Custody check recorded ✓');
+    }
   }
 }
 async function doFlag(id){
   const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);if(!k)return;
   k.Status='Flagged';
   const logRow={Timestamp:new Date().toISOString(),Action:'Flagged',KeyID:k.Transit,Guard:k.HeldBy,Note:'🚩 Flagged as missing / unresponsive guard',Manager:CFG.name};
-  audit.unshift(logRow);closeModal();renderAll();toast('Flagged 🚩');
+  audit.unshift(logRow);closeModal();fastRender('key');toast('Flagged 🚩');
   if(!CFG.demo){
     try{await updateRow('Keys','Transit',k.Transit,{Status:'Flagged'});await writeRow('AuditLog',logRow);}
     catch(e){toast('Flagged locally — Sheet sync failed',true);}
@@ -1404,7 +1539,7 @@ async function doUnflag(id){
   const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);if(!k)return;
   k.Status='Issued';
   const logRow={Timestamp:new Date().toISOString(),Action:'Unflagged',KeyID:k.Transit,Guard:k.HeldBy,Note:'Flag resolved – accounted for',Manager:CFG.name};
-  audit.unshift(logRow);closeModal();renderAll();toast('Unflagged ✓');
+  audit.unshift(logRow);closeModal();fastRender('key');toast('Unflagged ✓');
   if(!CFG.demo){
     try{await updateRow('Keys','Transit',k.Transit,{Status:'Issued'});await writeRow('AuditLog',logRow);}
     catch(e){toast('Unflagged locally — Sheet sync failed',true);}
@@ -1435,7 +1570,7 @@ async function doEditKey(oldTid){
   k.Client=newClient;k.Location=newLoc;k.Notes=newNotes;k.Photo=newPhoto;
   const logRow={Timestamp:new Date().toISOString(),Action:'Edited',KeyID:newTransit+'-'+newKeynum,Guard:'',Note:'Edited by '+CFG.name+'. Fields updated.',Manager:CFG.name};
   audit.unshift(logRow);
-  closeModal();renderAll();toast('Key/Fob updated ✓');
+  closeModal();fastRender('key');toast('Key/Fob updated ✓');
   if(!CFG.demo){
     try{
       await updateRow('Keys','Transit',oldTransit,{Transit:newTransit,KeyNumber:newKeynum,Type:newType,Client:newClient,Location:newLoc,Notes:newNotes,Photo:newPhoto},oldKeynum);
@@ -1466,19 +1601,19 @@ async function doDelete(type,id){
     keys.splice(idx,1);
     const logRow={Timestamp:new Date().toISOString(),Action:'Deleted',KeyID:k.Transit||id,Guard:'',Note:'Key/fob deleted by '+CFG.name,Manager:CFG.name};
     audit.unshift(logRow);
-    renderAll();toast('Deleted ✓');
+    fastRender('key');toast('Deleted ✓');
     if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Keys',idField:'Transit',idValue:k.Transit});await writeRow('AuditLog',logRow);}catch(e){toast('Deleted locally – sync may need manual cleanup',true);}}
   } else if(type==='client'){
     const idx=clients.findIndex(c=>c.Name===id);
     if(idx===-1)return;
     clients.splice(idx,1);
-    renderAll();toast('Client deleted ✓');
+    fastRender('client');toast('Client deleted ✓');
     if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Clients',idField:'Name',idValue:id});}catch(e){toast('Deleted locally',true);}}
   } else if(type==='guard'){
     const idx=guards.findIndex(g=>g.Name===id);
     if(idx===-1)return;
     guards.splice(idx,1);
-    renderGuards();toast('Guard deleted ✓');
+    fastRender('guard');toast('Guard deleted ✓');
     if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Guards',idField:'Name',idValue:id});}catch(e){toast('Deleted locally',true);}}
   }
 }
@@ -1649,6 +1784,37 @@ function toggleRecvAddress(val){
 function toggleBankContact(val){
   const box=document.getElementById('recv-bank-person-box');
   if(box)box.style.display=(val==='yes')?'':'none';
+}
+function onPickedBySearch(val){
+  const box=document.getElementById('pickedby-contact-box');
+  if(box)box.innerHTML=getGuardInfo(val)?guardContactHtml(val):'';
+  // Auto-fill role if guard is in registry
+  const g=getGuardInfo(val);
+  const roleSelect=document.getElementById('mf-pickedby-role');
+  if(g&&g.Role&&roleSelect){
+    for(let i=0;i<roleSelect.options.length;i++){
+      if(roleSelect.options[i].value===g.Role){roleSelect.selectedIndex=i;break;}
+    }
+  }
+}
+function onIssueGuardSearch(val){
+  const box=document.getElementById('issue-guard-contact-box');
+  if(box)box.innerHTML=getGuardInfo(val)?guardContactHtml(val):'';
+  const g=getGuardInfo(val);
+  const roleSelect=document.getElementById('mf-issue-guard-role');
+  if(g&&g.Role&&roleSelect){
+    for(let i=0;i<roleSelect.options.length;i++){
+      if(roleSelect.options[i].value===g.Role){roleSelect.selectedIndex=i;break;}
+    }
+  }
+}
+function toggleIssueNow(checked){
+  const fields=document.getElementById('issue-now-fields');
+  if(fields)fields.style.display=checked?'':'none';
+  if(checked){
+    const el=document.getElementById('mf-issue-guard-search');
+    if(el)el.focus();
+  }
 }
 function onGuardSearch(val){
   // Show contact info when a known guard name is typed/selected
