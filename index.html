@@ -495,14 +495,25 @@ function reconfigure(){localStorage.removeItem('kft_config');location.reload()}
 // ── API ───────────────────────────────────────────
 async function apiCall(payload){
   if(CFG.demo)throw new Error('Demo');
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),8000); // 8s timeout
+  // Apps Script cold start can take 10-20s — use 35s timeout
+  const fetchPromise=fetch(CFG.url,{
+    method:'POST',
+    headers:{'Content-Type':'text/plain'}, // avoid CORS preflight
+    body:JSON.stringify(payload)
+  });
+  const timeoutPromise=new Promise((_,reject)=>
+    setTimeout(()=>reject(new Error('Request timed out')),35000)
+  );
+  const r=await Promise.race([fetchPromise,timeoutPromise]);
+  const text=await r.text();
   try{
-    const r=await fetch(CFG.url,{method:'POST',body:JSON.stringify(payload),signal:controller.signal});
-    const j=await r.json();
+    const j=JSON.parse(text);
     if(j.error)throw new Error(j.error);
     return j;
-  }finally{clearTimeout(timer);}
+  }catch(e){
+    if(e.message&&e.message.includes('error'))throw e;
+    throw new Error('Invalid response from Apps Script');
+  }
 }
 async function loadData(silent=false){
   if(CFG.demo){renderAll();return}
@@ -521,7 +532,12 @@ async function loadData(silent=false){
     syncStatus('error');
     // Show the app anyway with empty state — never block the user
     renderAll();
-    if(!silent)toast('Could not reach Google Sheet. Check your Apps Script URL in ⚙ settings.',true);
+    if(!silent){
+      const msg=e.message&&e.message.includes('timed out')
+        ?'Google Sheet is slow to respond. Try refreshing in a moment.'
+        :'Could not reach Google Sheet. Check your Apps Script URL in ⚙ settings.';
+      toast(msg,true);
+    }
     console.error('loadData error:',e);
   }
   finally{
