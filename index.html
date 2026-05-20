@@ -903,8 +903,13 @@ function openModal(type,id){
     m.innerHTML=`<h3>Add key / fob to inventory</h3>
     <div class="mf">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="fg"><label>Transit #</label><input id="mf-transit" placeholder="e.g. MTL-008"></div>
-        <div class="fg"><label>Key / Fob number</label><input id="mf-keynum" placeholder="e.g. K-2241"></div>
+        <div class="fg"><label>Transit #</label><input id="mf-transit" placeholder="e.g. MTL-008" oninput="checkKeyExists()"></div>
+        <div class="fg"><label>Key / Fob number</label>
+          <input id="mf-keynum" placeholder="e.g. K-2241" oninput="checkKeyExists()">
+          <div id="key-exists-warning" style="display:none;margin-top:5px;padding:7px 10px;background:#fdf0ed;border:1px solid #e0b0a0;border-radius:var(--r);font-size:12px;color:var(--accent)">
+            ⚠️ A key/fob with this number already exists in the database.
+          </div>
+        </div>
       </div>
       <div class="fg"><label>Type</label><select id="mf-type"><option>Key</option><option>Fob</option></select></div>
       <div class="fg"><label>Client</label><select id="mf-client">${clientOpts}</select></div>
@@ -1487,6 +1492,29 @@ function showGuardContact(name, boxId){
   const box=document.getElementById(boxId);
   if(!box)return;
   box.innerHTML=guardContactHtml(name);
+}
+function checkKeyExists(){
+  const transit=v('mf-transit');
+  const keynum=v('mf-keynum');
+  const warning=document.getElementById('key-exists-warning');
+  const keynumInput=document.getElementById('mf-keynum');
+  if(!warning||!keynum)return;
+  // Check if Key # alone exists (regardless of transit)
+  const keyNumExists=keys.some(k=>k.KeyNumber&&k.KeyNumber.toLowerCase()===keynum.toLowerCase());
+  // Check Transit + KeyNumber exact combo
+  const exactExists=transit&&keys.some(k=>k.Transit===transit&&k.KeyNumber&&k.KeyNumber.toLowerCase()===keynum.toLowerCase());
+  if(keyNumExists){
+    const match=keys.find(k=>k.KeyNumber&&k.KeyNumber.toLowerCase()===keynum.toLowerCase());
+    const detail=match?(` Currently with: ${match.HeldBy||'—'}, Status: ${match.Status}, Location: ${match.Location||'—'}`):'';
+    warning.style.display='';
+    warning.innerHTML='⚠️ Key/Fob number <strong>'+keynum+'</strong> already exists in the database.'+
+      (detail?`<div style="margin-top:3px;color:var(--text);font-size:11px">${detail}</div>`:'')+
+      (exactExists?'<div style="color:var(--danger);margin-top:3px;font-weight:500">This exact Transit + Key# combination is a duplicate.</div>':'');
+    if(keynumInput)keynumInput.style.borderColor='var(--accent)';
+  } else {
+    warning.style.display='none';
+    if(keynumInput)keynumInput.style.borderColor='';
+  }
 }
 function v(id){const el=document.getElementById(id);return el?el.value.trim():''}
 function getGuards(){
