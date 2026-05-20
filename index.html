@@ -628,9 +628,18 @@ function fastRender(type){
 
 function checkOverdue(){
   keys.forEach(k=>{
-    if(k.Status==='Returned to Bank')return; // never flag returned keys
-    if((k.Status==='Issued'||k.Status==='Overdue')&&k.PickupDate){
-      if(daysOut(k.PickupDate)>=30&&k.Status==='Issued')k.Status='Overdue';
+    if(k.Status==='Returned to Bank')return;
+    if(k.Status==='Flagged')return;
+    if(!k.HeldBy||!k.PickupDate)return;
+    const daysIssuedOut=daysOut(k.PickupDate);
+    const daysSinceCheck=daysOut(k.LastCheckDate||k.PickupDate);
+    if(k.Status==='Issued'){
+      // Mark overdue only if out 30+ days AND no recent check in last 30 days
+      if(daysIssuedOut>=30&&daysSinceCheck>=30)k.Status='Overdue';
+    } else if(k.Status==='Overdue'){
+      // Clear overdue if a custody check was done recently (within 30 days)
+      // This means the guard is confirmed to still have it — it's just been out a long time
+      if(daysSinceCheck<30)k.Status='Issued';
     }
   });
 }
@@ -1555,6 +1564,8 @@ async function doCheck(keyId){
     const oldGuard=k.HeldBy;
     k.HeldBy=newGuard;
     k.LastCheckDate=today;
+    // Handoff confirms custody — clear Overdue status
+    if(k.Status==='Overdue')k.Status='Issued';
     noteText='Handoff: '+oldGuard+' → '+newGuard+(reason?'. Reason: '+reason:'')+(notes?'. '+notes:'');
     const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:fullKeyID,Guard:newGuard,Note:noteText,Manager:checker};
     audit.unshift(logRow);
@@ -1562,12 +1573,14 @@ async function doCheck(keyId){
     toast('Custody check recorded ✓');
     if(!CFG.demo){
       try{
-        await updateRow('Keys','Transit',k.Transit,{HeldBy:newGuard,LastCheckDate:today},k.KeyNumber);
+        await updateRow('Keys','Transit',k.Transit,{HeldBy:newGuard,LastCheckDate:today,Status:k.Status},k.KeyNumber);
         await writeRow('AuditLog',logRow);
       }catch(e){toast('Saved locally — Sheet sync failed. Refresh to verify.',true);}
     }
   } else {
     k.LastCheckDate=today;
+    // If key was Overdue, the check confirms custody — reset to Issued
+    if(k.Status==='Overdue')k.Status='Issued';
     noteText='Confirmed: same holder ('+k.HeldBy+').'+(notes?' '+notes:'');
     const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:fullKeyID,Guard:k.HeldBy,Note:noteText,Manager:checker};
     audit.unshift(logRow);
@@ -1575,8 +1588,8 @@ async function doCheck(keyId){
     toast('Custody check recorded ✓');
     if(!CFG.demo){
       try{
-        // CRITICAL: pass k.KeyNumber so Sheet updates the exact right row
-        await updateRow('Keys','Transit',k.Transit,{LastCheckDate:today},k.KeyNumber);
+        // Update both LastCheckDate AND Status (clears Overdue if applicable)
+        await updateRow('Keys','Transit',k.Transit,{LastCheckDate:today,Status:k.Status},k.KeyNumber);
         await writeRow('AuditLog',logRow);
       }catch(e){toast('Saved locally — Sheet sync failed. Refresh to verify.',true);}
     }
