@@ -506,14 +506,11 @@ async function apiCall(payload){
   );
   const r=await Promise.race([fetchPromise,timeoutPromise]);
   const text=await r.text();
-  try{
-    const j=JSON.parse(text);
-    if(j.error)throw new Error(j.error);
-    return j;
-  }catch(e){
-    if(e.message&&e.message.includes('error'))throw e;
-    throw new Error('Invalid response from Apps Script');
-  }
+  let j;
+  try{j=JSON.parse(text);}
+  catch(_){throw new Error('Apps Script returned invalid JSON. Check your deployment.');}
+  if(j&&j.error)throw new Error('Sheet error: '+j.error);
+  return j;
 }
 async function loadData(silent=false){
   if(CFG.demo){renderAll();return}
@@ -521,7 +518,33 @@ async function loadData(silent=false){
   if(!silent)showLoading('Connecting to Google Sheets…');
   try{
     const d=await apiCall({action:'getAll'});
-    keys=d.keys||[];audit=d.audit||[];clients=d.clients||[];guards=d.guards||[];
+    // Smart merge: update existing keys instead of replacing array
+    const incomingKeys=d.keys||[];
+    if(keys.length===0){
+      keys=incomingKeys;
+    } else {
+      const sheetMap=new Map(incomingKeys.map(k=>[k.Transit+'-'+k.KeyNumber,k]));
+      // Remove keys deleted in Sheet (but keep _localOnly ones)
+      keys=keys.filter(k=>sheetMap.has(k.Transit+'-'+k.KeyNumber)||k._localOnly);
+      // Update existing keys with Sheet data (Sheet is source of truth after save)
+      keys.forEach((k,i)=>{
+        const sk=sheetMap.get(k.Transit+'-'+k.KeyNumber);
+        if(sk){
+          // Always trust Sheet for LastCheckDate — this is the key fix for custody check revert
+          keys[i]=Object.assign({},sk);
+        }
+      });
+      // Add new keys created by other users
+      incomingKeys.forEach(sk=>{
+        if(!keys.find(k=>k.Transit===sk.Transit&&k.KeyNumber===sk.KeyNumber)){
+          keys.push(sk);
+        }
+      });
+    }
+    // Always replace audit, clients, guards (no local mutations on these during refresh)
+    if(d.audit)audit=d.audit.slice(0,500); // limit to 500 most recent
+    if(d.clients)clients=d.clients;
+    if(d.guards)guards=d.guards;
     renderAll();syncStatus('ok');
     const now=new Date();
     const ts=now.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -599,6 +622,7 @@ function fastRender(type){
 
 function checkOverdue(){
   keys.forEach(k=>{
+    if(k.Status==='Returned to Bank')return; // never flag returned keys
     if((k.Status==='Issued'||k.Status==='Overdue')&&k.PickupDate){
       if(daysOut(k.PickupDate)>=30&&k.Status==='Issued')k.Status='Overdue';
     }
@@ -606,11 +630,16 @@ function checkOverdue(){
 }
 
 function needsCheck(k){
-  if(k.Status==='With Staff'&&!k.HeldBy)return false;
-if(!k.PickupDate&&!k.HeldBy)return false;
-if(k.Status==='Returned to Bank')return false;
-  const refDate=k.LastCheckDate||k.PickupDate;
-  return daysOut(refDate)>=14;
+  if(!k.HeldBy)return false;
+  if(k.Status==='Returned to Bank')return false;
+  if(k.Status==='Flagged')return false;
+  if(k.Status==='With Staff'&&k.HeldByRole==='Manager')return false; // managers holding keys don't need 14d checks
+  if(!k.PickupDate)return false;
+  // Use LastCheckDate if available, else PickupDate
+  // Both could be ISO timestamp or plain date — daysOut handles both via UTC
+  const refDate=k.LastCheckDate&&k.LastCheckDate.length>=10?k.LastCheckDate:k.PickupDate;
+  const days=daysOut(refDate);
+  return days!==null&&days>=14;
 }
 
 function updateStats(){
@@ -887,7 +916,9 @@ function filterByClient(name){
 function renderAudit(){
   const q=(document.getElementById('audit-q').value||'').toLowerCase();
   const fa=document.getElementById('audit-action').value;
-  const filtered=audit.filter(e=>{
+  // Limit to 200 most recent for performance — full history always in Sheet
+  const recentAudit=audit.slice(0,200);
+  const filtered=recentAudit.filter(e=>{
     const hay=((e.KeyID||'')+' '+(e.Guard||'')+' '+(e.Note||'')+' '+(e.Action||'')+' '+(e.Manager||'')).toLowerCase();
     return(!q||hay.includes(q))&&(!fa||e.Action===fa);
   }).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp));
@@ -1409,7 +1440,7 @@ async function doAddKey(){
   const photoFile=document.getElementById('mf-photo');
   let photoData='';
   if(photoFile&&photoFile.files.length>0){
-    const promises=Array.from(photoFile.files).map(f=>new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(f);}));
+    const promises=Array.from(photoFile.files).map(f=>compressPhoto(f,800,0.7));
     const results=await Promise.all(promises);
     photoData=results.join('||PHOTO||');
     row.Photo=photoData; // update the already-pushed row
@@ -1456,7 +1487,7 @@ async function doIssue(){
     try{
       await updateRow('Keys','Transit',k.Transit,{Status:'Issued',HeldBy:guard,HeldByRole:role,PickupDate:pickupDate,LastCheckDate:pickupDate},k.KeyNumber);
       await writeRow('AuditLog',logRow);
-    }catch(e){toast('Saved locally – Sheet sync failed',true);}
+    }catch(e){toast('Saved locally – Sheet sync failed. Refresh to verify.',true);}
   }
 }
 async function doReturn(){
@@ -1496,48 +1527,52 @@ async function doReturn(){
   audit.unshift(logRow);closeModal();fastRender('key');toast('Return logged ✓');
   if(!CFG.demo){
     try{
-      await updateRow('Keys','Transit',k.Transit,{Status:newStatus,HeldBy:newHeldBy,HeldByRole:newHeldByRole,ReturnedTo:returnedTo,PickupDate:returnDate,LastCheckDate:returnDate});
+      await updateRow('Keys','Transit',k.Transit,{Status:newStatus,HeldBy:newHeldBy,HeldByRole:newHeldByRole,ReturnedTo:returnedTo,LastMovedDate:returnDate,LastCheckDate:returnDate},k.KeyNumber);
       await writeRow('AuditLog',logRow);
     }catch(e){toast('Return logged locally – Sheet sync failed',true);}
   }
 }
 async function doCheck(keyId){
-  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===keyId||x.Transit===keyId||x.KeyNumber===keyId);if(!k)return;
+  const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===keyId||x.Transit===keyId||x.KeyNumber===keyId);
+  if(!k){toast('Key not found',true);return;}
   const custody=v('mf-custody');
   const checker=v('mf-checker')||CFG.name;
   const notes=v('mf-notes');
   const today=new Date().toISOString().split('T')[0];
+  const fullKeyID=k.Transit+'-'+k.KeyNumber; // always use full ID for audit + Sheet lookup
   let noteText='';
   closeModal();
   if(custody==='handoff'){
     const newGuard=v('mf-newguard');
     const reason=v('mf-handoff-reason');
-    if(!newGuard){toast('Enter new guard name',true);return}
+    if(!newGuard){toast('Select the new guard',true);return}
     const oldGuard=k.HeldBy;
     k.HeldBy=newGuard;
     k.LastCheckDate=today;
-    noteText=`Handoff: ${oldGuard} → ${newGuard}. Reason: ${reason}. ${notes}`;
-    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit,Guard:newGuard,Note:noteText,Manager:checker};
+    noteText='Handoff: '+oldGuard+' → '+newGuard+(reason?'. Reason: '+reason:'')+(notes?'. '+notes:'');
+    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:fullKeyID,Guard:newGuard,Note:noteText,Manager:checker};
     audit.unshift(logRow);
-    fastRender('key');toast('Custody check recorded ✓');
+    fastRender('key');
+    toast('Custody check recorded ✓');
     if(!CFG.demo){
       try{
-        await updateRow('Keys','Transit',k.Transit,{HeldBy:newGuard,LastCheckDate:today});
+        await updateRow('Keys','Transit',k.Transit,{HeldBy:newGuard,LastCheckDate:today},k.KeyNumber);
         await writeRow('AuditLog',logRow);
-        toast('Custody check recorded ✓');
-      }catch(e){toast('Saved locally — sync to Sheet failed',true);}
-    } else toast('Custody check recorded ✓');
+      }catch(e){toast('Saved locally — Sheet sync failed. Refresh to verify.',true);}
+    }
   } else {
     k.LastCheckDate=today;
-    noteText=`Confirmed: same holder (${k.HeldBy}). ${notes}`;
-    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:k.Transit,Guard:k.HeldBy,Note:noteText,Manager:checker};
+    noteText='Confirmed: same holder ('+k.HeldBy+').'+(notes?' '+notes:'');
+    const logRow={Timestamp:new Date().toISOString(),Action:'Check',KeyID:fullKeyID,Guard:k.HeldBy,Note:noteText,Manager:checker};
     audit.unshift(logRow);
-    fastRender('key');toast('Custody check recorded ✓');
+    fastRender('key');
+    toast('Custody check recorded ✓');
     if(!CFG.demo){
       try{
-        await updateRow('Keys','Transit',k.Transit,{LastCheckDate:today});
+        // CRITICAL: pass k.KeyNumber so Sheet updates the exact right row
+        await updateRow('Keys','Transit',k.Transit,{LastCheckDate:today},k.KeyNumber);
         await writeRow('AuditLog',logRow);
-      }catch(e){toast('Saved locally — sync to Sheet failed',true);}
+      }catch(e){toast('Saved locally — Sheet sync failed. Refresh to verify.',true);}
     }
   }
 }
@@ -1547,7 +1582,7 @@ async function doFlag(id){
   const logRow={Timestamp:new Date().toISOString(),Action:'Flagged',KeyID:k.Transit,Guard:k.HeldBy,Note:'🚩 Flagged as missing / unresponsive guard',Manager:CFG.name};
   audit.unshift(logRow);closeModal();fastRender('key');toast('Flagged 🚩');
   if(!CFG.demo){
-    try{await updateRow('Keys','Transit',k.Transit,{Status:'Flagged'});await writeRow('AuditLog',logRow);}
+    try{await updateRow('Keys','Transit',k.Transit,{Status:'Flagged'},k.KeyNumber);await writeRow('AuditLog',logRow);}
     catch(e){toast('Flagged locally — Sheet sync failed',true);}
   }
 }
@@ -1557,7 +1592,7 @@ async function doUnflag(id){
   const logRow={Timestamp:new Date().toISOString(),Action:'Unflagged',KeyID:k.Transit,Guard:k.HeldBy,Note:'Flag resolved – accounted for',Manager:CFG.name};
   audit.unshift(logRow);closeModal();fastRender('key');toast('Unflagged ✓');
   if(!CFG.demo){
-    try{await updateRow('Keys','Transit',k.Transit,{Status:'Issued'});await writeRow('AuditLog',logRow);}
+    try{await updateRow('Keys','Transit',k.Transit,{Status:'Issued'},k.KeyNumber);await writeRow('AuditLog',logRow);}
     catch(e){toast('Unflagged locally — Sheet sync failed',true);}
   }
 }
@@ -1575,7 +1610,7 @@ async function doEditKey(oldTid){
   let newPhoto=k.Photo||'';
   const photoFile=document.getElementById('ef-photo');
   if(photoFile&&photoFile.files.length>0){
-    const promises=Array.from(photoFile.files).map(f=>new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(f);}));
+    const promises=Array.from(photoFile.files).map(f=>compressPhoto(f,800,0.7));
     const results=await Promise.all(promises);
     newPhoto=results.join('||PHOTO||');
   }
@@ -1618,7 +1653,7 @@ async function doDelete(type,id){
     const logRow={Timestamp:new Date().toISOString(),Action:'Deleted',KeyID:k.Transit||id,Guard:'',Note:'Key/fob deleted by '+CFG.name,Manager:CFG.name};
     audit.unshift(logRow);
     fastRender('key');toast('Deleted ✓');
-    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Keys',idField:'Transit',idValue:k.Transit});await writeRow('AuditLog',logRow);}catch(e){toast('Deleted locally – sync may need manual cleanup',true);}}
+    if(!CFG.demo){try{await apiCall({action:'deleteRow',sheet:'Keys',idField:'Transit',idValue:k.Transit,keyNumber:k.KeyNumber});await writeRow('AuditLog',logRow);}catch(e){toast('Deleted locally – sync may need manual cleanup',true);}}
   } else if(type==='client'){
     const idx=clients.findIndex(c=>c.Name===id);
     if(idx===-1)return;
@@ -1774,8 +1809,10 @@ function toast(msg,err=false){
   _tt=setTimeout(()=>{el.className=''},3500);
 }
 function exportCSV(){
+  // Export current filtered view if on inventory, else all keys
+  const src=(currentTab==='inventory'&&lastFiltered.length)?lastFiltered:keys;
   const hdr=['Transit','KeyNumber','Type','Client','Location','Status','HeldBy','HeldByRole','PickupDate','DaysOut','LastCheckDate','ReturnedTo','Notes'];
-  const rows=keys.map(k=>[k.Transit||'',k.KeyNumber||'',k.Type,k.Client,k.Location,k.Status,k.HeldBy||'',k.HeldByRole||'',k.PickupDate||'',daysOut(k.PickupDate)??'',k.LastCheckDate||'',k.ReturnedTo||'',k.Notes||'']);
+  const rows=src.map(k=>[k.Transit||'',k.KeyNumber||'',k.Type,k.Client,k.Location,k.Status,k.HeldBy||'',k.HeldByRole||'',fmtDate(k.PickupDate),daysOut(k.PickupDate)??'',fmtDate(k.LastCheckDate),k.ReturnedTo||'',k.Notes||'']);
   const csv=[hdr,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'\\"')}"`).join(',')).join('\n');
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
@@ -1919,6 +1956,29 @@ document.addEventListener('click',function(e){
   }
 });
 
+
+// Compress photo to max width/height and quality before storing
+function compressPhoto(file, maxSize, quality){
+  return new Promise(res=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        const canvas=document.createElement('canvas');
+        let w=img.width, h=img.height;
+        if(w>maxSize||h>maxSize){
+          if(w>h){h=Math.round(h*maxSize/w);w=maxSize;}
+          else{w=Math.round(w*maxSize/h);h=maxSize;}
+        }
+        canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        res(canvas.toDataURL('image/jpeg',quality));
+      };
+      img.src=e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 let _lbFilename='photo';
 function openPhotoLightbox(src,filename){
   _lbFilename=filename||'key-photo';
