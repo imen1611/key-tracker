@@ -1422,7 +1422,7 @@ function openModal(type,id){
     const recentAudit=audit.filter(e=>e.KeyID===tid).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp)).slice(0,3);
     m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
     ${k.Photo?(()=>{
-      const photos=k.Photo.split('||PHOTO||').filter(p=>p);
+      const photos=k.Photo.split('||PHOTO||').filter(p=>p&&!p.startsWith('[photo-too-large'));
       if(photos.length===1)return `<img src="${photos[0]}" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r2);margin-bottom:6px;border:1px solid var(--border);background:var(--off);cursor:zoom-in" onclick="openPhotoLightbox('${photos[0]}','${k.Transit||''}_${k.KeyNumber||''}')" title="Click to view & download">
         <div style="font-size:11px;color:var(--muted);margin-bottom:1rem;text-align:center">Click photo to enlarge &amp; download</div>`;
       return `<div class="photo-gallery" style="margin-bottom:1rem">${photos.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in" onclick="openPhotoLightbox('${p}','${k.Transit||''}_${k.KeyNumber||''}_${i+1}')" title="Click to view & download">`).join('')}
@@ -1538,7 +1538,7 @@ async function doAddKey(){
   const photoFile=document.getElementById('mf-photo');
   let photoData='';
   if(photoFile&&photoFile.files.length>0){
-    const promises=Array.from(photoFile.files).map(f=>compressPhoto(f,800,0.7));
+    const promises=Array.from(photoFile.files).map(f=>compressPhoto(f,400,0.5));
     const results=await Promise.all(promises);
     photoData=results.join('||PHOTO||');
     row.Photo=photoData; // update the already-pushed row
@@ -1718,7 +1718,7 @@ async function doEditKey(oldTid){
   let newPhoto=k.Photo||'';
   const photoFile=document.getElementById('ef-photo');
   if(photoFile&&photoFile.files.length>0){
-    const promises=Array.from(photoFile.files).map(f=>compressPhoto(f,800,0.7));
+    const promises=Array.from(photoFile.files).map(f=>compressPhoto(f,400,0.5));
     const results=await Promise.all(promises);
     newPhoto=results.join('||PHOTO||');
   }
@@ -2088,7 +2088,14 @@ function compressPhoto(file, maxSize, quality){
         }
         canvas.width=w;canvas.height=h;
         canvas.getContext('2d').drawImage(img,0,0,w,h);
-        res(canvas.toDataURL('image/jpeg',quality));
+        // Try quality levels until under 30,000 chars (safe for Google Sheets 50K limit)
+        let q=quality;
+        let data=canvas.toDataURL('image/jpeg',q);
+        while(data.length>30000&&q>0.1){
+          q=Math.round((q-0.1)*10)/10;
+          data=canvas.toDataURL('image/jpeg',q);
+        }
+        res(data);
       };
       img.src=e.target.result;
     };
