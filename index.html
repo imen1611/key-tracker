@@ -499,8 +499,9 @@ async function apiCall(payload){
   if(CFG.demo)throw new Error('Demo');
 
   const isRead=payload.action==='getAll';
+  const needsResponse=payload.action==='getAll'||payload.action==='uploadPhoto';
 
-  if(isRead){
+  if(needsResponse){
     // For reads: use regular fetch — needs response data
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),40000);
@@ -1422,15 +1423,22 @@ function openModal(type,id){
     const recentAudit=audit.filter(e=>e.KeyID===tid).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp)).slice(0,3);
     m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
     ${k.Photo?(()=>{
-      const photos=k.Photo.split('||PHOTO||').filter(p=>p&&!p.startsWith('[photo-too-large'));
+      const photos=k.Photo.split('||PHOTO||').filter(p=>p&&p.length>4);
       if(!photos.length)return '';
-      // Store photos in a global temp var — never embed base64 in onclick attributes
       window._currentPhotos=photos;
       window._currentPhotoName=(k.Transit||'')+'_'+(k.KeyNumber||'');
-      if(photos.length===1)return `<img src="${photos[0]}" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r2);margin-bottom:6px;border:1px solid var(--border);background:var(--off);cursor:zoom-in" onclick="openPhotoLightbox(window._currentPhotos[0],window._currentPhotoName)" title="Click to view & download">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:1rem;text-align:center">Click photo to enlarge &amp; download</div>`;
-      return `<div class="photo-gallery" style="margin-bottom:1rem">${photos.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in" onclick="openPhotoLightbox(window._currentPhotos[${i}],window._currentPhotoName+'_${i+1}')" title="Click to view & download">`).join('')}
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;width:100%">Click any photo to enlarge &amp; download</div></div>`;
+      if(photos.length===1){
+        const isDrive=photos[0].startsWith('http');
+        return `<div style="margin-bottom:1rem">
+          <img src="${photos[0]}" style="width:100%;max-height:220px;object-fit:contain;border-radius:var(--r2);border:1px solid var(--border);background:var(--off);cursor:zoom-in;display:block" onclick="openPhotoLightbox(window._currentPhotos[0],window._currentPhotoName)" title="Click to enlarge">
+          <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+            <span style="font-size:11px;color:var(--muted)">Click to enlarge</span>
+            <a href="${photos[0]}" download="${(k.Transit||'')}_${(k.KeyNumber||'')}.jpg" target="_blank" style="font-size:12px;color:var(--blue);text-decoration:none;padding:3px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)">⬇ Download</a>
+          </div>
+        </div>`;
+      }
+      return `<div class="photo-gallery" style="margin-bottom:.5rem">${photos.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in;border-radius:var(--r);border:1px solid var(--border)" onclick="openPhotoLightbox(window._currentPhotos[${i}],window._currentPhotoName+'_${i+1}')" title="Click to enlarge & download">`).join('')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:1rem">${photos.map((p,i)=>`<a href="${p}" download="${(k.Transit||'')}_${(k.KeyNumber||'')}_${i+1}.jpg" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:none;padding:2px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)">⬇ Photo ${i+1}</a>`).join('')}</div>`;
     })():''}
     <div class="modal-detail">
       <table>
@@ -1530,22 +1538,22 @@ async function doAddKey(){
   const finalHolder=issueNow?issueGuard:(pickedBy||CFG.name);
   const finalRole=issueNow?issueGuardRole:pickedByRole;
   const finalStatus=issueNow?'Issued':'With Staff';
-  // Add key immediately with no photo — close modal and render right away
+  // Add key immediately — close modal and render right away
   const row={Transit:transit,KeyNumber:keynum,Type:type,Client:client,Location:loc,Status:finalStatus,HeldBy:finalHolder,HeldByRole:finalRole,PickupDate:pickupDate,LastCheckDate:pickupDate,ReturnedTo:'',Photo:'',Notes:notes,AddedDate:today};
   const addNote='Received via: '+recvNote+'. Key#: '+keynum+'. Picked up by: '+pickedBy+(issueNow?' → issued directly to: '+issueGuard:'')+'. '+notes;
   const logRow={Timestamp:new Date().toISOString(),Action:'Added',KeyID:transit+'-'+keynum,Guard:finalHolder,Note:addNote,Manager:CFG.name};
-  // If issued directly, also log an issuance event
   const issueLogRow=issueNow?{Timestamp:new Date().toISOString(),Action:'Issued',KeyID:transit+'-'+keynum,Guard:issueGuard,Note:'Issued directly on pickup. Pickup date: '+pickupDate+'. Picked up by: '+pickedBy,Manager:CFG.name}:null;
   keys.push(row);audit.unshift(logRow);if(issueLogRow)audit.unshift(issueLogRow);
   closeModal();fastRender('key');toast(issueNow?'Added & issued to '+issueGuard+' ✓':'Added ✓');
-  // Read photos and save to Sheet in background — no UI blocking
+  // Upload photos to Drive, then save row to Sheet
   const photoFile=document.getElementById('mf-photo');
-  let photoData='';
   if(photoFile&&photoFile.files.length>0){
-    const promises=Array.from(photoFile.files).map(f=>compressPhoto(f,400,0.5));
-    const results=await Promise.all(promises);
-    photoData=results.join('||PHOTO||');
-    row.Photo=photoData; // update the already-pushed row
+    toast('Uploading photos…');
+    try{
+      const compressed=await Promise.all(Array.from(photoFile.files).map(f=>compressPhoto(f,800,0.8)));
+      const urls=await uploadPhotosToDrive(compressed,transit+'-'+keynum);
+      row.Photo=urls.join('||PHOTO||');
+    }catch(e){toast('Photo upload failed: '+e.message,true);}
   }
   if(!CFG.demo){
     try{
@@ -1718,13 +1726,16 @@ async function doEditKey(oldTid){
   const newPickup=v('ef-pickup')||k.PickupDate;
   const newLastCheck=v('ef-lastcheck')||k.LastCheckDate;
   const newReturnedTo=v('ef-returnedto');
-  // Handle new photos — keep existing if none uploaded
+  // Handle new photos — upload to Drive if new ones selected, keep existing URLs otherwise
   let newPhoto=k.Photo||'';
   const photoFile=document.getElementById('ef-photo');
   if(photoFile&&photoFile.files.length>0){
-    const promises=Array.from(photoFile.files).map(f=>compressPhoto(f,400,0.5));
-    const results=await Promise.all(promises);
-    newPhoto=results.join('||PHOTO||');
+    toast('Uploading photos to Drive…');
+    try{
+      const compressed=await Promise.all(Array.from(photoFile.files).map(f=>compressPhoto(f,800,0.8)));
+      const urls=await uploadPhotosToDrive(compressed,newTransit+'-'+newKeynum);
+      newPhoto=urls.join('||PHOTO||');
+    }catch(e){toast('Photo upload failed: '+e.message,true);}
   }
   // Update local object
   const oldTransit=k.Transit;
@@ -2187,6 +2198,29 @@ async function doQuickAddGuard(){
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('quick-guard-overlay')?.style.display==='flex')closeQuickAddGuard();});
 document.getElementById('quick-guard-overlay').addEventListener('click',function(e){if(e.target===this)closeQuickAddGuard();});
 
+
+// Upload photos to Google Drive via Apps Script — returns array of shareable URLs
+async function uploadPhotosToDrive(base64Array, keyId){
+  if(CFG.demo){
+    // In demo mode, keep as base64
+    return base64Array;
+  }
+  const results=[];
+  for(let i=0;i<base64Array.length;i++){
+    try{
+      const resp=await apiCall({
+        action:'uploadPhoto',
+        base64:base64Array[i],
+        filename:keyId+'_photo'+(i+1)+'.jpg'
+      });
+      if(resp&&resp.url)results.push(resp.url);
+      else results.push(base64Array[i]); // fallback to base64 if upload fails
+    }catch(e){
+      results.push(base64Array[i]); // fallback to base64
+    }
+  }
+  return results;
+}
 let _lbFilename='photo';
 function openPhotoLightbox(src,filename){
   _lbFilename=filename||'key-photo';
@@ -2208,6 +2242,7 @@ function downloadPhoto(){
   const a=document.createElement('a');
   a.href=img.src;
   a.download=_lbFilename+'.jpg';
+  a.target='_blank'; // for Drive URLs, open in new tab (browsers block cross-origin download)
   a.click();
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closePhotoLightbox();});
