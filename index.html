@@ -1335,6 +1335,12 @@ function openModal(type,id){
   else if(type==='editKey'){
     const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
     if(!k)return;
+    // Resolve photo from cache before rendering
+    const editKeyId=k.Transit+'-'+k.KeyNumber;
+    if(!k.Photo||(!k.Photo.startsWith('data:')&&!k.Photo.startsWith('http'))){
+      const cached=loadPhotoCache(editKeyId);
+      if(cached)k.Photo=cached;
+    }
     const cOpts=clients.map(c=>`<option${c.Name===k.Client?' selected':''}>${c.Name}</option>`).join('')+(clients.length?'':`<option>CIBC</option><option>RBC</option>`);
     const gOpts=guards.length?guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}"${g.Name===k.HeldBy?' selected':''}>${g.Name}${g.Role?' — '+g.Role:''}</option>`).join(''):'';
     const roleOpts=['Guard','Mobile','Supervisor','Manager','Other'].map(r=>`<option${r===k.HeldByRole?' selected':''}>${r}</option>`).join('');
@@ -1396,8 +1402,8 @@ function openModal(type,id){
 
       <div style="border-top:1px solid var(--border);margin:1rem 0;padding-top:1rem">
         <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:.75rem">Photos</div>
-        ${k.Photo?`<div class="fg"><label>Current photos</label>
-          <div class="photo-gallery">${(()=>{const ep=k.Photo.split('||PHOTO||').filter(p=>p);window._editPhotos=ep;window._editPhotoName=(k.Transit||'')+'_'+(k.KeyNumber||'');return ep.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in;border-radius:var(--r);border:1px solid var(--border)" onclick="openPhotoLightbox(window._editPhotos[${i}],window._editPhotoName+'_${i+1}')">`).join('');})()}</div>
+        ${k.Photo&&(k.Photo.startsWith('data:')||k.Photo.startsWith('http'))?`<div class="fg"><label>Current photos</label>
+          <div class="photo-gallery">${(()=>{const ep=k.Photo.split('||PHOTO||').filter(p=>p&&(p.startsWith('data:')||p.startsWith('http')));window._editPhotos=ep;window._editPhotoName=(k.Transit||'')+'_'+(k.KeyNumber||'');return ep.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in;border-radius:var(--r);border:1px solid var(--border)" onclick="openPhotoLightbox(window._editPhotos[${i}],window._editPhotoName+'_${i+1}')">`).join('');})()}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Upload new photos below to replace these</div>
         </div>`:''}
         <div class="fg"><label>Replace / add photos <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
@@ -1418,12 +1424,18 @@ function openModal(type,id){
   else if(type==='view'){
     const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
     if(!k)return;
+    // Resolve photo from cache before rendering — handles all storage formats
+    const viewKeyId=k.Transit+'-'+k.KeyNumber;
+    if(!k.Photo||(!k.Photo.startsWith('data:')&&!k.Photo.startsWith('http'))){
+      const cached=loadPhotoCache(viewKeyId);
+      if(cached)k.Photo=cached;
+    }
+    if(k.Photo&&k.Photo.startsWith('data:'))savePhotoCache(viewKeyId,k.Photo);
     const days=daysOut(k.PickupDate);
     const checkDays=daysOut(k.LastCheckDate||k.PickupDate);
     const tid=(k.Transit||'')+(k.Transit&&k.KeyNumber?'-':'')+(k.KeyNumber||'');
     const recentAudit=audit.filter(e=>e.KeyID===tid).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp)).slice(0,3);
     m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
-    ${(()=>{if(k.Photo&&!k.Photo.startsWith('data:')&&!k.Photo.startsWith('http')&&k.Photo.length<100){const c=loadPhotoCache(k.Photo);if(c)k.Photo=c;}})()}
     ${k.Photo&&(k.Photo.startsWith('data:')||k.Photo.startsWith('http'))?(()=>{
       const photos=k.Photo.split('||PHOTO||').filter(p=>p&&p.length>4);
       if(!photos.length)return '';
