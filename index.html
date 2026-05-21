@@ -1345,7 +1345,15 @@ function openModal(type,id){
           </div>
         </div>
         <div class="fg"><label>Held by (guard / staff)</label>
-          <input id="ef-heldby" list="ef-guards-list" value="${k.HeldBy||''}" placeholder="Name of person currently holding it" oninput="showGuardContact(this.value,'ef-guard-contact')">
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="ef-heldby" list="ef-guards-list" value="${k.HeldBy||''}" placeholder="Name of person currently holding it"
+              oninput="showGuardContact(this.value,'ef-guard-contact')"
+              style="flex:1;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
+            <button type="button" onclick="openQuickAddGuard('editkey-heldby')"
+              style="white-space:nowrap;padding:7px 11px;border:1px solid var(--accent2);border-radius:var(--r);background:var(--blue-bg);color:var(--blue);font-family:var(--ff);font-size:12px;cursor:pointer;flex-shrink:0">
+              + New guard
+            </button>
+          </div>
           <datalist id="ef-guards-list">${gOpts}</datalist>
           <div id="ef-guard-contact" style="margin-top:4px"></div>
         </div>
@@ -2117,8 +2125,18 @@ async function doQuickAddGuard(){
       const opt=document.createElement('option');
       opt.value=name;dl.appendChild(opt);
     }
+  } else if(_quickGuardTarget==='editkey-heldby'){
+    const el=document.getElementById('ef-heldby');
+    if(el){el.value=name;showGuardContact(name,'ef-guard-contact');}
+    const roleEl=document.getElementById('ef-heldbyrole');
+    if(roleEl){
+      for(let i=0;i<roleEl.options.length;i++){
+        if(roleEl.options[i].value===role){roleEl.selectedIndex=i;break;}
+      }
+    }
+    const dl=document.getElementById('ef-guards-list');
+    if(dl){const opt=document.createElement('option');opt.value=name;dl.appendChild(opt);}
   } else if(_quickGuardTarget==='issueguard'){
-    const el=document.getElementById('mf-issue-guard-search');
     if(el){el.value=name;onIssueGuardSearch(name);}
     // Also refresh the issue guard role
     const roleEl=document.getElementById('mf-issue-guard-role');
