@@ -495,15 +495,14 @@ function reconfigure(){localStorage.removeItem('kft_config');location.reload()}
 // ── API ───────────────────────────────────────────
 async function apiCall(payload){
   if(CFG.demo)throw new Error('Demo');
-  // Use GET with payload as URL param — avoids CORS preflight that blocks POST from GitHub Pages
-  // Google Apps Script handles GET with ?payload= correctly
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),40000);
   let r;
   try{
-    const encoded=encodeURIComponent(JSON.stringify(payload));
-    r=await fetch(CFG.url+'?payload='+encoded,{
-      method:'GET',
+    r=await fetch(CFG.url,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(payload),
       signal:controller.signal
     });
     clearTimeout(timer);
@@ -605,9 +604,9 @@ function renderAll(){
   updateStats();
   populateClientFilter();
   renderTable();
+  renderClients();
+  renderGuards();
   if(currentTab==='reminders')renderReminders();
-  if(currentTab==='clients')renderClients();
-  if(currentTab==='guards')renderGuards();
   if(currentTab==='audit')renderAudit();
 }
 
@@ -620,9 +619,13 @@ function fastRender(type){
     renderTable();
     if(currentTab==='reminders')renderReminders();
   }
-  if(type==='client')populateClientFilter();
-  if(currentTab==='clients'&&(type==='client'||type==='all'))renderClients();
-  if(currentTab==='guards'&&(type==='guard'||type==='all'))renderGuards();
+  if(type==='client'||type==='all'){
+    populateClientFilter();
+    renderClients();
+  }
+  if(type==='guard'||type==='all'){
+    renderGuards();
+  }
   if(currentTab==='audit')renderAudit();
 }
 
@@ -1097,9 +1100,15 @@ function openModal(type,id){
           </div>
         </div>
         <div class="fg"><label>Picked up by</label>
-          <input id="mf-pickedby-search" list="gl-pickedby" placeholder="Type name or select from guards list…"
-            oninput="onPickedBySearch(this.value)"
-            style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="mf-pickedby-search" list="gl-pickedby" placeholder="Type name or select from guards list…"
+              oninput="onPickedBySearch(this.value)"
+              style="flex:1;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none">
+            <button type="button" onclick="openQuickAddGuard('pickedby')"
+              style="white-space:nowrap;padding:7px 11px;border:1px solid var(--accent2);border-radius:var(--r);background:var(--blue-bg);color:var(--blue);font-family:var(--ff);font-size:12px;cursor:pointer;flex-shrink:0">
+              + New guard
+            </button>
+          </div>
           <datalist id="gl-pickedby">
             ${guardPickupOpts}
             <option value="${CFG.name}">${CFG.name} (you)</option>
@@ -1115,10 +1124,16 @@ function openModal(type,id){
         </div>
         <div id="issue-now-fields" style="display:none;padding:10px;background:var(--blue-bg);border-radius:var(--r);margin-top:4px">
           <div class="fg"><label>Issue to (guard)</label>
-            <input id="mf-issue-guard-search" list="gl-issue-guard"
-              placeholder="Type guard name or select…"
-              oninput="onIssueGuardSearch(this.value)"
-              style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none;background:white">
+            <div style="display:flex;gap:6px;align-items:center">
+              <input id="mf-issue-guard-search" list="gl-issue-guard"
+                placeholder="Type guard name or select…"
+                oninput="onIssueGuardSearch(this.value)"
+                style="flex:1;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r);font-family:var(--ff);font-size:13px;outline:none;background:white">
+              <button type="button" onclick="openQuickAddGuard('issueguard')"
+                style="white-space:nowrap;padding:7px 11px;border:1px solid var(--accent2);border-radius:var(--r);background:white;color:var(--blue);font-family:var(--ff);font-size:12px;cursor:pointer;flex-shrink:0">
+                + New guard
+              </button>
+            </div>
             <datalist id="gl-issue-guard">${guardPickupOpts}</datalist>
             <div id="issue-guard-contact-box" style="margin-top:4px"></div>
           </div>
@@ -1998,6 +2013,81 @@ function compressPhoto(file, maxSize, quality){
     reader.readAsDataURL(file);
   });
 }
+// ── QUICK ADD GUARD (from within addKey modal) ────────────
+let _quickGuardTarget=''; // 'pickedby' or 'issueguard'
+
+function openQuickAddGuard(target){
+  _quickGuardTarget=target;
+  // Clear fields
+  ['qg-name','qg-phone','qg-email','qg-notes'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value='';
+  });
+  const overlay=document.getElementById('quick-guard-overlay');
+  if(overlay){overlay.style.display='flex';}
+  setTimeout(()=>{const n=document.getElementById('qg-name');if(n)n.focus();},50);
+}
+
+function closeQuickAddGuard(){
+  const overlay=document.getElementById('quick-guard-overlay');
+  if(overlay)overlay.style.display='none';
+}
+
+async function doQuickAddGuard(){
+  const name=document.getElementById('qg-name')?document.getElementById('qg-name').value.trim():'';
+  if(!name){
+    document.getElementById('qg-name').style.borderColor='var(--accent)';
+    document.getElementById('qg-name').placeholder='Name is required';
+    return;
+  }
+  const phone=document.getElementById('qg-phone')?document.getElementById('qg-phone').value.trim():'';
+  const email=document.getElementById('qg-email')?document.getElementById('qg-email').value.trim():'';
+  const role=document.getElementById('qg-role')?document.getElementById('qg-role').value:'Guard';
+  const notes=document.getElementById('qg-notes')?document.getElementById('qg-notes').value.trim():'';
+  const today=new Date().toISOString().split('T')[0];
+  // Add to guards array
+  const newGuard={Name:name,Phone:phone,Email:email,Role:role,Notes:notes,AddedDate:today};
+  if(!guards.find(g=>g.Name===name)){
+    guards.push(newGuard);
+  }
+  // Save to Sheet in background
+  if(!CFG.demo){
+    try{await writeRow('Guards',newGuard);}catch(e){console.error('Guard save failed:',e);}
+  }
+  // Close overlay
+  closeQuickAddGuard();
+  // Fill the right field with the new guard name
+  if(_quickGuardTarget==='pickedby'){
+    const el=document.getElementById('mf-pickedby-search');
+    if(el){el.value=name;onPickedBySearch(name);}
+    // Refresh datalist
+    const dl=document.getElementById('gl-pickedby');
+    if(dl){
+      const opt=document.createElement('option');
+      opt.value=name;dl.appendChild(opt);
+    }
+  } else if(_quickGuardTarget==='issueguard'){
+    const el=document.getElementById('mf-issue-guard-search');
+    if(el){el.value=name;onIssueGuardSearch(name);}
+    // Also refresh the issue guard role
+    const roleEl=document.getElementById('mf-issue-guard-role');
+    if(roleEl){
+      for(let i=0;i<roleEl.options.length;i++){
+        if(roleEl.options[i].value===role){roleEl.selectedIndex=i;break;}
+      }
+    }
+    const dl=document.getElementById('gl-issue-guard');
+    if(dl){
+      const opt=document.createElement('option');
+      opt.value=name;dl.appendChild(opt);
+    }
+  }
+  toast(name+' added as guard ✓');
+}
+
+// Close quick overlay on Escape or clicking backdrop
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('quick-guard-overlay')?.style.display==='flex')closeQuickAddGuard();});
+document.getElementById('quick-guard-overlay').addEventListener('click',function(e){if(e.target===this)closeQuickAddGuard();});
+
 let _lbFilename='photo';
 function openPhotoLightbox(src,filename){
   _lbFilename=filename||'key-photo';
@@ -2023,5 +2113,27 @@ function downloadPhoto(){
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closePhotoLightbox();});
 </script>
+<!-- QUICK ADD GUARD OVERLAY (sits on top of addKey modal without closing it) -->
+<div id="quick-guard-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:center;justify-content:center;padding:1rem">
+  <div style="background:var(--surface);border-radius:12px;padding:1.75rem;width:100%;max-width:460px;box-shadow:0 8px 40px rgba(0,0,0,.25)">
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:1.25rem">Add new guard</h3>
+    <div class="mf">
+      <div class="fg"><label>Full name</label><input id="qg-name" placeholder="e.g. Alex Tremblay"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label>Phone</label><input id="qg-phone" type="tel" placeholder="514-555-0000"></div>
+        <div class="fg"><label>Email</label><input id="qg-email" type="email" placeholder="guard@email.com"></div>
+      </div>
+      <div class="fg"><label>Role</label>
+        <select id="qg-role"><option>Guard</option><option>Mobile</option><option>Supervisor</option><option>Manager</option></select>
+      </div>
+      <div class="fg"><label>Notes</label><textarea id="qg-notes" placeholder="Coverage areas, shifts…" style="height:60px"></textarea></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <button class="btn-outline" onclick="closeQuickAddGuard()">Cancel</button>
+      <button class="btn-action" onclick="doQuickAddGuard()">Save guard &amp; use</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
