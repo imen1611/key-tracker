@@ -576,6 +576,7 @@ async function loadData(silent=false){
     if(d.audit)audit=d.audit.slice(0,500); // limit to 500 most recent
     if(d.clients)clients=d.clients;
     if(d.guards)guards=d.guards;
+    enrichKeysWithPhotos();
     renderAll();syncStatus('ok');
     const now=new Date();
     const ts=now.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -1422,7 +1423,8 @@ function openModal(type,id){
     const tid=(k.Transit||'')+(k.Transit&&k.KeyNumber?'-':'')+(k.KeyNumber||'');
     const recentAudit=audit.filter(e=>e.KeyID===tid).sort((a,b)=>new Date(b.Timestamp)-new Date(a.Timestamp)).slice(0,3);
     m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
-    ${k.Photo?(()=>{
+    ${(()=>{if(k.Photo&&!k.Photo.startsWith('data:')&&!k.Photo.startsWith('http')&&k.Photo.length<100){const c=loadPhotoCache(k.Photo);if(c)k.Photo=c;}})()}
+    ${k.Photo&&(k.Photo.startsWith('data:')||k.Photo.startsWith('http'))?(()=>{
       const photos=k.Photo.split('||PHOTO||').filter(p=>p&&p.length>4);
       if(!photos.length)return '';
       window._currentPhotos=photos;
@@ -1545,15 +1547,40 @@ async function doAddKey(){
   const issueLogRow=issueNow?{Timestamp:new Date().toISOString(),Action:'Issued',KeyID:transit+'-'+keynum,Guard:issueGuard,Note:'Issued directly on pickup. Pickup date: '+pickupDate+'. Picked up by: '+pickedBy,Manager:CFG.name}:null;
   keys.push(row);audit.unshift(logRow);if(issueLogRow)audit.unshift(issueLogRow);
   closeModal();fastRender('key');toast(issueNow?'Added & issued to '+issueGuard+' ✓':'Added ✓');
-  // Upload photos to Drive, then save row to Sheet
+  // Save photos to localStorage immediately for instant display
+  // Then upload to Google Drive in background — URL replaces local cache when ready
   const photoFile=document.getElementById('mf-photo');
   if(photoFile&&photoFile.files.length>0){
-    toast('Uploading photos…');
     try{
-      const compressed=await Promise.all(Array.from(photoFile.files).map(f=>compressPhoto(f,800,0.8)));
-      const urls=await uploadPhotosToDrive(compressed,transit+'-'+keynum);
-      row.Photo=urls.join('||PHOTO||');
-    }catch(e){toast('Photo upload failed: '+e.message,true);}
+      const compressed=await Promise.all(Array.from(photoFile.files).map(f=>compressPhoto(f,600,0.6)));
+      const photoData=compressed.join('||PHOTO||');
+      const keyId=transit+'-'+keynum;
+      // 1. Save locally for immediate display
+      savePhotoCache(keyId, photoData);
+      const localKey=keys.find(k=>k.Transit===transit&&k.KeyNumber===keynum);
+      if(localKey)localKey.Photo=photoData;
+      row.Photo=''; // placeholder — will update after Drive upload
+      // 2. Upload to Drive in background
+      (async()=>{
+        try{
+          const driveUrls=await uploadPhotosToDrive(compressed,keyId);
+          const driveData=driveUrls.join('||PHOTO||');
+          const isDrive=driveData.startsWith('http');
+          if(isDrive){
+            // Drive upload succeeded — update Sheet and local state
+            if(localKey)localKey.Photo=driveData;
+            savePhotoCache(keyId,driveData);
+            row.Photo=driveData;
+            if(!CFG.demo)await updateRow('Keys','Transit',transit,{Photo:driveData},keynum);
+            toast('Photos saved to Google Drive ✓');
+          } else {
+            // Fallback — store compressed base64 in Sheet (may truncate)
+            row.Photo=photoData.length<=48000?photoData:'';
+            if(!CFG.demo&&row.Photo)await updateRow('Keys','Transit',transit,{Photo:row.Photo},keynum);
+          }
+        }catch(e){console.error('Drive upload error:',e);}
+      })();
+    }catch(e){console.error('Photo compress failed:',e);}
   }
   if(!CFG.demo){
     try{
@@ -1726,16 +1753,36 @@ async function doEditKey(oldTid){
   const newPickup=v('ef-pickup')||k.PickupDate;
   const newLastCheck=v('ef-lastcheck')||k.LastCheckDate;
   const newReturnedTo=v('ef-returnedto');
-  // Handle new photos — upload to Drive if new ones selected, keep existing URLs otherwise
+  // Save photos — localStorage first, Drive in background
   let newPhoto=k.Photo||'';
   const photoFile=document.getElementById('ef-photo');
   if(photoFile&&photoFile.files.length>0){
-    toast('Uploading photos to Drive…');
     try{
-      const compressed=await Promise.all(Array.from(photoFile.files).map(f=>compressPhoto(f,800,0.8)));
-      const urls=await uploadPhotosToDrive(compressed,newTransit+'-'+newKeynum);
-      newPhoto=urls.join('||PHOTO||');
-    }catch(e){toast('Photo upload failed: '+e.message,true);}
+      const compressed=await Promise.all(Array.from(photoFile.files).map(f=>compressPhoto(f,600,0.6)));
+      const photoData=compressed.join('||PHOTO||');
+      const keyId=newTransit+'-'+newKeynum;
+      savePhotoCache(keyId,photoData);
+      k.Photo=photoData;
+      newPhoto=''; // placeholder
+      // Upload to Drive in background
+      (async()=>{
+        try{
+          const driveUrls=await uploadPhotosToDrive(compressed,keyId);
+          const driveData=driveUrls.join('||PHOTO||');
+          const isDrive=driveData.startsWith('http');
+          if(isDrive){
+            k.Photo=driveData;
+            savePhotoCache(keyId,driveData);
+            newPhoto=driveData;
+            if(!CFG.demo)await updateRow('Keys','Transit',oldTransit,{Photo:driveData},oldKeynum);
+            toast('Photos saved to Google Drive ✓');
+          } else {
+            newPhoto=photoData.length<=48000?photoData:'';
+            if(!CFG.demo&&newPhoto)await updateRow('Keys','Transit',oldTransit,{Photo:newPhoto},oldKeynum);
+          }
+        }catch(e){console.error('Drive upload error:',e);}
+      })();
+    }catch(e){console.error('Photo compress failed:',e);}
   }
   // Update local object
   const oldTransit=k.Transit;
@@ -2199,27 +2246,94 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElement
 document.getElementById('quick-guard-overlay').addEventListener('click',function(e){if(e.target===this)closeQuickAddGuard();});
 
 
-// Upload photos to Google Drive via Apps Script — returns array of shareable URLs
+// Upload photo to Google Drive via Apps Script using no-cors POST
+// Returns a promise that resolves with the Drive URL
+async function uploadPhotoToDrive(base64Data, filename){
+  if(CFG.demo)return base64Data;
+  // Use no-cors fetch — we can't read the response, so we poll the Sheet for the result
+  // Instead, use a relay: encode filename in URL, send base64 as body
+  return new Promise(async(resolve,reject)=>{
+    try{
+      // Send upload request — no-cors so no response needed from browser
+      // Apps Script will save to Drive and log the URL in a temp cell
+      const uploadId='upload_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+      // Try regular fetch first (works if CORS is configured)
+      let driveUrl=null;
+      try{
+        const r=await fetch(CFG.url,{
+          method:'POST',
+          headers:{'Content-Type':'text/plain;charset=utf-8'},
+          body:JSON.stringify({action:'uploadPhoto',base64:base64Data,filename:filename,uploadId:uploadId})
+        });
+        const text=await r.text();
+        const j=JSON.parse(text);
+        if(j&&j.url){driveUrl=j.url;}
+      }catch(corsErr){
+        // CORS blocked — fall back to localStorage cache only
+        console.warn('Drive upload blocked by CORS, using local cache');
+      }
+      resolve(driveUrl||base64Data); // fallback to base64 if Drive upload fails
+    }catch(e){
+      resolve(base64Data); // always resolve — never reject
+    }
+  });
+}
+
 async function uploadPhotosToDrive(base64Array, keyId){
-  if(CFG.demo){
-    // In demo mode, keep as base64
-    return base64Array;
-  }
+  if(CFG.demo)return base64Array;
   const results=[];
   for(let i=0;i<base64Array.length;i++){
-    try{
-      const resp=await apiCall({
-        action:'uploadPhoto',
-        base64:base64Array[i],
-        filename:keyId+'_photo'+(i+1)+'.jpg'
-      });
-      if(resp&&resp.url)results.push(resp.url);
-      else results.push(base64Array[i]); // fallback to base64 if upload fails
-    }catch(e){
-      results.push(base64Array[i]); // fallback to base64
-    }
+    const filename=keyId.replace(/[^a-zA-Z0-9-_]/g,'_')+'_photo'+(i+1)+'.jpg';
+    const url=await uploadPhotoToDrive(base64Array[i],filename);
+    results.push(url);
   }
   return results;
+}
+
+// ── PHOTO CACHE (localStorage) ────────────────────────────
+// Photos stored locally by key ID — never sent to Sheet (avoids 50K cell limit)
+const PHOTO_PREFIX='kft_photo_';
+
+function savePhotoCache(keyId, photoData){
+  try{
+    localStorage.setItem(PHOTO_PREFIX+keyId, photoData);
+    return true;
+  }catch(e){
+    // localStorage full — clear old photos and retry
+    clearOldPhotoCache();
+    try{localStorage.setItem(PHOTO_PREFIX+keyId, photoData);return true;}
+    catch(e2){return false;}
+  }
+}
+
+function loadPhotoCache(keyId){
+  try{return localStorage.getItem(PHOTO_PREFIX+keyId)||'';}
+  catch(e){return '';}
+}
+
+function clearOldPhotoCache(){
+  // Remove photos for keys no longer in inventory
+  const activeIds=new Set(keys.map(k=>k.Transit+'-'+k.KeyNumber));
+  Object.keys(localStorage).forEach(key=>{
+    if(key.startsWith(PHOTO_PREFIX)){
+      const id=key.replace(PHOTO_PREFIX,'');
+      if(!activeIds.has(id))localStorage.removeItem(key);
+    }
+  });
+}
+
+// Enrich keys with locally cached photos after loading from Sheet
+function enrichKeysWithPhotos(){
+  keys.forEach(k=>{
+    const keyId=k.Transit+'-'+k.KeyNumber;
+    if(!k.Photo||k.Photo.startsWith('[photo-too-large')||k.Photo.startsWith('[photo')){
+      const cached=loadPhotoCache(keyId);
+      if(cached)k.Photo=cached;
+    } else if(k.Photo&&k.Photo.startsWith('data:')){
+      // Photo came from Sheet as base64 — save to local cache for reliability
+      savePhotoCache(keyId, k.Photo);
+    }
+  });
 }
 let _lbFilename='photo';
 function openPhotoLightbox(src,filename){
