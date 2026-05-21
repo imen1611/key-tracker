@@ -1395,7 +1395,7 @@ function openModal(type,id){
       <div style="border-top:1px solid var(--border);margin:1rem 0;padding-top:1rem">
         <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:.75rem">Photos</div>
         ${k.Photo?`<div class="fg"><label>Current photos</label>
-          <div class="photo-gallery">${k.Photo.split('||PHOTO||').filter(p=>p).map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in;border-radius:var(--r);border:1px solid var(--border)" onclick="openPhotoLightbox('${p}','${k.Transit}_${k.KeyNumber}_${i+1}')">`).join('')}</div>
+          <div class="photo-gallery">${(()=>{const ep=k.Photo.split('||PHOTO||').filter(p=>p);window._editPhotos=ep;window._editPhotoName=(k.Transit||'')+'_'+(k.KeyNumber||'');return ep.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in;border-radius:var(--r);border:1px solid var(--border)" onclick="openPhotoLightbox(window._editPhotos[${i}],window._editPhotoName+'_${i+1}')">`).join('');})()}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Upload new photos below to replace these</div>
         </div>`:''}
         <div class="fg"><label>Replace / add photos <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
@@ -1423,9 +1423,13 @@ function openModal(type,id){
     m.innerHTML=`<h3 style="font-family:var(--mono);font-size:15px">${k.Transit} / ${k.KeyNumber}</h3>
     ${k.Photo?(()=>{
       const photos=k.Photo.split('||PHOTO||').filter(p=>p&&!p.startsWith('[photo-too-large'));
-      if(photos.length===1)return `<img src="${photos[0]}" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r2);margin-bottom:6px;border:1px solid var(--border);background:var(--off);cursor:zoom-in" onclick="openPhotoLightbox('${photos[0]}','${k.Transit||''}_${k.KeyNumber||''}')" title="Click to view & download">
+      if(!photos.length)return '';
+      // Store photos in a global temp var — never embed base64 in onclick attributes
+      window._currentPhotos=photos;
+      window._currentPhotoName=(k.Transit||'')+'_'+(k.KeyNumber||'');
+      if(photos.length===1)return `<img src="${photos[0]}" style="width:100%;max-height:200px;object-fit:contain;border-radius:var(--r2);margin-bottom:6px;border:1px solid var(--border);background:var(--off);cursor:zoom-in" onclick="openPhotoLightbox(window._currentPhotos[0],window._currentPhotoName)" title="Click to view & download">
         <div style="font-size:11px;color:var(--muted);margin-bottom:1rem;text-align:center">Click photo to enlarge &amp; download</div>`;
-      return `<div class="photo-gallery" style="margin-bottom:1rem">${photos.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in" onclick="openPhotoLightbox('${p}','${k.Transit||''}_${k.KeyNumber||''}_${i+1}')" title="Click to view & download">`).join('')}
+      return `<div class="photo-gallery" style="margin-bottom:1rem">${photos.map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in" onclick="openPhotoLightbox(window._currentPhotos[${i}],window._currentPhotoName+'_${i+1}')" title="Click to view & download">`).join('')}
         <div style="font-size:11px;color:var(--muted);margin-top:4px;width:100%">Click any photo to enlarge &amp; download</div></div>`;
     })():''}
     <div class="modal-detail">
