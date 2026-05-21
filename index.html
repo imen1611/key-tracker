@@ -1312,8 +1312,12 @@ function openModal(type,id){
     const k=keys.find(x=>(x.Transit+'-'+x.KeyNumber)===id||x.Transit===id||x.KeyNumber===id);
     if(!k)return;
     const cOpts=clients.map(c=>`<option${c.Name===k.Client?' selected':''}>${c.Name}</option>`).join('')+(clients.length?'':`<option>CIBC</option><option>RBC</option>`);
-    m.innerHTML=`<h3>Edit key / fob — ${k.Transit} / ${k.KeyNumber}</h3>
+    const gOpts=guards.length?guards.sort((a,b)=>a.Name.localeCompare(b.Name)).map(g=>`<option value="${g.Name}"${g.Name===k.HeldBy?' selected':''}>${g.Name}${g.Role?' — '+g.Role:''}</option>`).join(''):'';
+    const roleOpts=['Guard','Mobile','Supervisor','Manager','Other'].map(r=>`<option${r===k.HeldByRole?' selected':''}>${r}</option>`).join('');
+    m.innerHTML=`<h3>Edit key / fob — <span style="font-family:var(--mono)">${k.Transit} / ${k.KeyNumber}</span></h3>
     <div class="mf">
+
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:.5rem">Key details</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fg"><label>Transit #</label><input id="ef-transit" value="${k.Transit||''}"></div>
         <div class="fg"><label>Key / Fob number</label><input id="ef-keynum" value="${k.KeyNumber||''}"></div>
@@ -1327,13 +1331,47 @@ function openModal(type,id){
       <div class="fg"><label>Client</label><select id="ef-client">${cOpts}</select></div>
       <div class="fg"><label>Branch / location</label><input id="ef-loc" value="${k.Location||''}"></div>
       <div class="fg"><label>Notes</label><textarea id="ef-notes">${k.Notes||''}</textarea></div>
-      ${k.Photo?`<div class="fg"><label>Current photo(s)</label>
-        <div class="photo-gallery">${k.Photo.split('||PHOTO||').filter(p=>p).map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in" onclick="openPhotoLightbox('${p}','${k.Transit}_${k.KeyNumber}_${i+1}')">`).join('')}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">To replace photos, upload new ones below</div>
-      </div>`:''}
-      <div class="fg"><label>Replace / add photos <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-        <input type="file" id="ef-photo" accept="image/*" multiple style="font-family:var(--ff);font-size:13px;padding:6px;width:100%">
-        <div id="ef-photo-preview" class="photo-gallery" style="margin-top:6px"></div>
+
+      <div style="border-top:1px solid var(--border);margin:1rem 0;padding-top:1rem">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:.75rem">Custody</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fg"><label>Status</label>
+            <select id="ef-status">
+              ${['With Staff','Issued','Overdue','Flagged','Returned to Bank'].map(s=>`<option${s===k.Status?' selected':''}>${s}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg"><label>Held by role</label>
+            <select id="ef-heldbyrole">${roleOpts}</select>
+          </div>
+        </div>
+        <div class="fg"><label>Held by (guard / staff)</label>
+          <input id="ef-heldby" list="ef-guards-list" value="${k.HeldBy||''}" placeholder="Name of person currently holding it" oninput="showGuardContact(this.value,'ef-guard-contact')">
+          <datalist id="ef-guards-list">${gOpts}</datalist>
+          <div id="ef-guard-contact" style="margin-top:4px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="fg"><label>Pickup date</label>
+            <input type="date" id="ef-pickup" value="${(k.PickupDate||'').split('T')[0]}">
+          </div>
+          <div class="fg"><label>Last check date</label>
+            <input type="date" id="ef-lastcheck" value="${(k.LastCheckDate||'').split('T')[0]}">
+          </div>
+        </div>
+        <div class="fg"><label>Returned to</label>
+          <input id="ef-returnedto" value="${k.ReturnedTo||''}" placeholder="Who it was last returned to (if applicable)">
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);margin:1rem 0;padding-top:1rem">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:.75rem">Photos</div>
+        ${k.Photo?`<div class="fg"><label>Current photos</label>
+          <div class="photo-gallery">${k.Photo.split('||PHOTO||').filter(p=>p).map((p,i)=>`<img src="${p}" style="width:90px;height:90px;object-fit:cover;cursor:zoom-in;border-radius:var(--r);border:1px solid var(--border)" onclick="openPhotoLightbox('${p}','${k.Transit}_${k.KeyNumber}_${i+1}')">`).join('')}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">Upload new photos below to replace these</div>
+        </div>`:''}
+        <div class="fg"><label>Replace / add photos <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+          <input type="file" id="ef-photo" accept="image/*" multiple style="font-family:var(--ff);font-size:13px;padding:6px;width:100%">
+          <div id="ef-photo-preview" class="photo-gallery" style="margin-top:6px"></div>
+        </div>
       </div>
     </div>
     <div class="modal-actions">
@@ -1640,7 +1678,13 @@ async function doEditKey(oldTid){
   const newClient=v('ef-client');
   const newLoc=v('ef-loc');
   const newNotes=v('ef-notes');
-  // Handle new photos — if none uploaded keep existing
+  const newStatus=v('ef-status')||k.Status;
+  const newHeldBy=v('ef-heldby');
+  const newHeldByRole=v('ef-heldbyrole')||k.HeldByRole;
+  const newPickup=v('ef-pickup')||k.PickupDate;
+  const newLastCheck=v('ef-lastcheck')||k.LastCheckDate;
+  const newReturnedTo=v('ef-returnedto');
+  // Handle new photos — keep existing if none uploaded
   let newPhoto=k.Photo||'';
   const photoFile=document.getElementById('ef-photo');
   if(photoFile&&photoFile.files.length>0){
@@ -1652,13 +1696,21 @@ async function doEditKey(oldTid){
   const oldTransit=k.Transit;
   const oldKeynum=k.KeyNumber;
   k.Transit=newTransit;k.KeyNumber=newKeynum;k.Type=newType;
-  k.Client=newClient;k.Location=newLoc;k.Notes=newNotes;k.Photo=newPhoto;
-  const logRow={Timestamp:new Date().toISOString(),Action:'Edited',KeyID:newTransit+'-'+newKeynum,Guard:'',Note:'Edited by '+CFG.name+'. Fields updated.',Manager:CFG.name};
+  k.Client=newClient;k.Location=newLoc;k.Notes=newNotes;
+  k.Status=newStatus;k.HeldBy=newHeldBy;k.HeldByRole=newHeldByRole;
+  k.PickupDate=newPickup;k.LastCheckDate=newLastCheck;k.ReturnedTo=newReturnedTo;
+  k.Photo=newPhoto;
+  const logRow={Timestamp:new Date().toISOString(),Action:'Edited',KeyID:newTransit+'-'+newKeynum,Guard:newHeldBy||'',Note:'Edited by '+CFG.name,Manager:CFG.name};
   audit.unshift(logRow);
   closeModal();fastRender('key');toast('Key/Fob updated ✓');
   if(!CFG.demo){
     try{
-      await updateRow('Keys','Transit',oldTransit,{Transit:newTransit,KeyNumber:newKeynum,Type:newType,Client:newClient,Location:newLoc,Notes:newNotes,Photo:newPhoto},oldKeynum);
+      await updateRow('Keys','Transit',oldTransit,{
+        Transit:newTransit,KeyNumber:newKeynum,Type:newType,Client:newClient,
+        Location:newLoc,Notes:newNotes,Status:newStatus,HeldBy:newHeldBy,
+        HeldByRole:newHeldByRole,PickupDate:newPickup,LastCheckDate:newLastCheck,
+        ReturnedTo:newReturnedTo,Photo:newPhoto
+      },oldKeynum);
       await writeRow('AuditLog',logRow);
     }catch(e){toast('Updated locally – Sheet sync failed',true);}
   }
