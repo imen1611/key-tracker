@@ -201,7 +201,9 @@ tbody tr:hover td{background:#faf8f4}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-txt{font-size:12px;color:var(--muted);font-family:var(--mono)}
 .section-empty{text-align:center;padding:3rem;color:var(--muted);font-size:13px}
-.tag-type{font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--off);padding:2px 6px;border-radius:3px}
+.tag-type{font-size:11px;font-family:var(--mono);padding:2px 8px;border-radius:3px;font-weight:500}
+.tag-key{background:#edf3fa;color:#1a4a7a;border:1px solid #b5d4f4}
+.tag-fob{background:#f3f0fa;color:#4a1a7a;border:1px solid #c8b8f0}
 .overdue-row td{background:#fffbf5!important}
 .photo-thumb{width:36px;height:36px;object-fit:cover;border-radius:3px;border:1px solid var(--border);cursor:pointer;vertical-align:middle}
 .flagged-row td{background:#fff8f8!important}
@@ -790,7 +792,7 @@ function renderTable(resetPage){
     return`<tr class="${rc}">
       <td class="mono" style="font-weight:500">${k.Transit||'—'}</td>
       <td class="mono">${k.KeyNumber||'—'}</td>
-      <td><span class="tag-type">${k.Type}</span></td>
+      <td><span class="tag-type ${k.Type==='Key'?'tag-key':'tag-fob'}">${k.Type}</span></td>
       <td style="font-weight:500;font-size:12px">${k.Client}</td>
       <td style="font-size:12px;max-width:160px;line-height:1.4">${k.Location}</td>
       <td>${statusBadge(k.Status,checkDue)}</td>
@@ -862,7 +864,7 @@ function renderReminders(){
         <div class="rc-title">
           Transit: <span style="font-family:var(--mono);font-weight:600">${k.Transit||'—'}</span>
           &nbsp;/&nbsp; Key #: <span style="font-family:var(--mono)">${k.KeyNumber||'—'}</span>
-          &nbsp;·&nbsp; <span class="tag-type">${k.Type||'—'}</span>
+          &nbsp;·&nbsp; <span class="tag-type ${(k.Type||'')=='Key'?'tag-key':'tag-fob'}">${k.Type||'—'}</span>
         </div>
         <div class="rc-meta">
           Client: <strong>${k.Client}</strong> &nbsp;·&nbsp; Location: ${k.Location||'—'}<br>
@@ -2078,12 +2080,18 @@ let _quickGuardTarget=''; // 'pickedby' or 'issueguard'
 
 function openQuickAddGuard(target){
   _quickGuardTarget=target;
-  // Clear fields
+  // Clear all fields
   ['qg-name','qg-phone','qg-email','qg-notes'].forEach(id=>{
-    const el=document.getElementById(id);if(el)el.value='';
+    const el=document.getElementById(id);
+    if(el){el.value='';el.style.borderColor='';}
   });
+  const roleEl=document.getElementById('qg-role');
+  if(roleEl)roleEl.selectedIndex=0;
   const overlay=document.getElementById('quick-guard-overlay');
-  if(overlay){overlay.style.display='flex';}
+  if(overlay){
+    overlay.style.display='flex';
+    overlay.style.setProperty('display','flex','important');
+  }
   setTimeout(()=>{const n=document.getElementById('qg-name');if(n)n.focus();},50);
 }
 
@@ -2093,10 +2101,10 @@ function closeQuickAddGuard(){
 }
 
 async function doQuickAddGuard(){
-  const name=document.getElementById('qg-name')?document.getElementById('qg-name').value.trim():'';
+  const nameEl=document.getElementById('qg-name');
+  const name=nameEl?nameEl.value.trim():'';
   if(!name){
-    document.getElementById('qg-name').style.borderColor='var(--accent)';
-    document.getElementById('qg-name').placeholder='Name is required';
+    if(nameEl){nameEl.style.borderColor='var(--accent)';nameEl.placeholder='Name is required';}
     return;
   }
   const phone=document.getElementById('qg-phone')?document.getElementById('qg-phone').value.trim():'';
@@ -2104,54 +2112,44 @@ async function doQuickAddGuard(){
   const role=document.getElementById('qg-role')?document.getElementById('qg-role').value:'Guard';
   const notes=document.getElementById('qg-notes')?document.getElementById('qg-notes').value.trim():'';
   const today=new Date().toISOString().split('T')[0];
-  // Add to guards array
-  const newGuard={Name:name,Phone:phone,Email:email,Role:role,Notes:notes,AddedDate:today};
-  if(!guards.find(g=>g.Name===name)){
+  // Only add + write to Sheet if truly new — case-insensitive check
+  const alreadyExists=guards.find(g=>g.Name.toLowerCase()===name.toLowerCase());
+  if(!alreadyExists){
+    const newGuard={Name:name,Phone:phone,Email:email,Role:role,Notes:notes,AddedDate:today};
     guards.push(newGuard);
+    if(!CFG.demo){
+      try{
+        await writeRow('Guards',newGuard);
+      }catch(e){
+        toast('Guard saved locally but Sheet sync failed: '+e.message,true);
+        console.error('Guard save failed:',e);
+      }
+    }
+    fastRender('guard');
   }
-  // Save to Sheet in background
-  if(!CFG.demo){
-    try{await writeRow('Guards',newGuard);}catch(e){console.error('Guard save failed:',e);}
-  }
-  // Close overlay
   closeQuickAddGuard();
-  // Fill the right field with the new guard name
+  // Fill the correct target field
   if(_quickGuardTarget==='pickedby'){
     const el=document.getElementById('mf-pickedby-search');
     if(el){el.value=name;onPickedBySearch(name);}
-    // Refresh datalist
     const dl=document.getElementById('gl-pickedby');
-    if(dl){
-      const opt=document.createElement('option');
-      opt.value=name;dl.appendChild(opt);
-    }
+    if(dl&&!alreadyExists){const opt=document.createElement('option');opt.value=name;dl.appendChild(opt);}
   } else if(_quickGuardTarget==='editkey-heldby'){
     const el=document.getElementById('ef-heldby');
     if(el){el.value=name;showGuardContact(name,'ef-guard-contact');}
     const roleEl=document.getElementById('ef-heldbyrole');
-    if(roleEl){
-      for(let i=0;i<roleEl.options.length;i++){
-        if(roleEl.options[i].value===role){roleEl.selectedIndex=i;break;}
-      }
-    }
+    if(roleEl){for(let i=0;i<roleEl.options.length;i++){if(roleEl.options[i].value===role){roleEl.selectedIndex=i;break;}}}
     const dl=document.getElementById('ef-guards-list');
-    if(dl){const opt=document.createElement('option');opt.value=name;dl.appendChild(opt);}
+    if(dl&&!alreadyExists){const opt=document.createElement('option');opt.value=name;dl.appendChild(opt);}
   } else if(_quickGuardTarget==='issueguard'){
+    const el=document.getElementById('mf-issue-guard-search');
     if(el){el.value=name;onIssueGuardSearch(name);}
-    // Also refresh the issue guard role
     const roleEl=document.getElementById('mf-issue-guard-role');
-    if(roleEl){
-      for(let i=0;i<roleEl.options.length;i++){
-        if(roleEl.options[i].value===role){roleEl.selectedIndex=i;break;}
-      }
-    }
+    if(roleEl){for(let i=0;i<roleEl.options.length;i++){if(roleEl.options[i].value===role){roleEl.selectedIndex=i;break;}}}
     const dl=document.getElementById('gl-issue-guard');
-    if(dl){
-      const opt=document.createElement('option');
-      opt.value=name;dl.appendChild(opt);
-    }
+    if(dl&&!alreadyExists){const opt=document.createElement('option');opt.value=name;dl.appendChild(opt);}
   }
-  toast(name+' added as guard ✓');
+  toast(alreadyExists?name+' already in guards — filled in ✓':name+' added as guard ✓');
 }
 
 // Close quick overlay on Escape or clicking backdrop
@@ -2184,7 +2182,7 @@ function downloadPhoto(){
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closePhotoLightbox();});
 </script>
 <!-- QUICK ADD GUARD OVERLAY (sits on top of addKey modal without closing it) -->
-<div id="quick-guard-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:center;justify-content:center;padding:1rem">
+<div id="quick-guard-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:1rem">
   <div style="background:var(--surface);border-radius:12px;padding:1.75rem;width:100%;max-width:460px;box-shadow:0 8px 40px rgba(0,0,0,.25)">
     <h3 style="font-size:16px;font-weight:600;margin-bottom:1.25rem">Add new guard</h3>
     <div class="mf">
